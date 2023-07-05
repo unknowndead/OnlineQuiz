@@ -1,0 +1,5331 @@
+
+MAIN:
+DATABASE:
+*DB:
+package db;
+
+import java.sql.*;
+import java.io.PrintWriter;
+import jakarta.servlet.http.HttpSession;
+
+import models.User;
+import util.Util;
+import models.questions.*;
+import models.Score;
+import java.util.*;
+
+public class Database {
+	static final String JDBC_DRIVER = "com.mysql.cj.jdbc.Driver";
+	// static final String DB_URL = "jdbc:mysql://bxdckaiotjos6uxqsxij-mysql.services.clever-cloud.com:3306/bxdckaiotjos6uxqsxij";
+	static final String DB_URL = "jdbc:mysql://localhost:3306/online-quiz";
+	// static final String USER = "u1bl3chv4wysc2pd";
+	static final String USER = "root";
+	// static final String PASS = "fFWLbfvEvE8CYje7Cv3o";
+	static final String PASS = "root123";
+
+	public static void submitFeedback(String quizid, String username, int rating) {
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			stmt.executeUpdate("insert into feedback values('" + quizid + "','" + username + "','" + rating + "')");
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+	public static void submitAnswer(String qid, String username, String selected, int isCorrect) {
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			stmt.executeUpdate("INSERT INTO scoreboard (questionid, username, selected, isCorrect) VALUES('" + qid
+					+ "', '" + username + "', '" + selected + "', '" + isCorrect + "')");
+		} catch (Exception e) {
+			System.out.println("DATABASE ERROR");
+			e.printStackTrace();
+		}
+	}
+
+	public static Question getQuestion(String questionid) {
+		Question q = null;
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			ResultSet rs = stmt.executeQuery("SELECT * FROM questions WHERE questionid='" + questionid + "'");
+			if (rs.next()) {
+				String qname = rs.getString("question");
+				String a = rs.getString("option1");
+				String b = rs.getString("option2");
+				String c = rs.getString("option3");
+				String d = rs.getString("option4");
+				String ca = rs.getString("correctanswer");
+
+				q = new MCQ(qname, new String[] { a, b, c, d }, ca);
+			}
+
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return q;
+	}
+
+	public static boolean quizExists(String quizid) {
+		int count = 0;
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			ResultSet rs = stmt.executeQuery("SELECT COUNT(quizid) as count FROM quiz WHERE quizid='" + quizid + "'");
+			if (rs.next()) {
+				count = rs.getInt("count");
+			}
+
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return count > 0;
+	}
+
+	public static int[] getPerQuestionResult(String quesid) {
+		int[] score = new int[2];
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			ResultSet rs = stmt.executeQuery(
+					"SELECT COUNT(CASE WHEN isCorrect = 0 then isCorrect end) as wrong, COUNT(CASE WHEN isCorrect = 1 then isCorrect end) as correct from scoreboard where questionid = '"
+							+ quesid + "'");
+			while (rs.next()) {
+				score[0] = rs.getInt("correct");
+				score[1] = rs.getInt("wrong");
+			}
+			System.out.println(score[0]);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return score;
+	}
+
+	public static String getCorrectAnswer(String qid) {
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			ResultSet rs = stmt.executeQuery("SELECT correctanswer FROM questions WHERE questionid='" + qid + "'");
+			if (rs.next())
+				return rs.getString("correctanswer");
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return null;
+	}
+
+	public static List<Score> getScoreboard(String quizid) {
+		List<Score> scores = new ArrayList<>();
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			String sql = "SELECT s.username, SUM(s.isCorrect) AS score, (SELECT COUNT(questionid) from questions where quizid='"
+					+ quizid + "') as total FROM quiz qu, scoreboard s WHERE qu.quizid='" + quizid
+					+ "' and s.questionid IN(SELECT questionid FROM questions WHERE quizid='" + quizid
+					+ "') GROUP BY username ORDER BY score DESC;";
+			ResultSet rs = stmt.executeQuery(sql);
+			while (rs.next()) {
+				String username = rs.getString("username");
+				int score = rs.getInt("score");
+				int total = rs.getInt("total");
+				scores.add(new Score(username, score, total));
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return scores;
+	}
+
+	public static void updateQuestion(String qid, Question q) {
+		MCQ question = (MCQ) q;
+
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			String[] answers = question.getAnswers();
+			stmt.executeUpdate("UPDATE questions SET question='" + question.getQuestion() + "', option1='" + answers[0]
+					+ "', option2='" + answers[1] + "', option3='" + answers[2] + "', option4='" + answers[3]
+					+ "', correctanswer='" + question.getCorrectAnswer() + "' WHERE questionid='" + qid + "'");
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+	public static void deleteQuiz(String qid) {
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			stmt.executeUpdate("DELETE FROM quiz WHERE quizid='" + qid + "'");
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+	public static void deleteQuestion(String qid) {
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			stmt.executeUpdate("DELETE FROM questions WHERE questionid='" + qid + "'");
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+	public static void addQuestion(Question q, Integer quizid, int qno) {
+		MCQ question = (MCQ) q;
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			String[] answers = question.getAnswers();
+			stmt.executeUpdate(
+					"INSERT INTO questions (questionid, question, quizid, option1, option2, option3, option4, correctanswer, type, correctPoints, minusPoints, timestamp, qno) VALUES('"
+							+ Util.getUniqueID(6) + "', '" + question.getQuestion() + "', '" + quizid + "', '"
+							+ answers[0] + "', '" + answers[1] + "', '" + answers[2] + "', '" + answers[3] + "', '"
+							+ question.getCorrectAnswer() + "', 'MCQ', '1', '0', '" + java.time.LocalDateTime.now()
+							+ "', '" + qno + "')");
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+	public static Integer getNumericId(String username, String quizname) {
+		boolean unique = false;
+		Integer quizid = Util.getNumericID(6);
+
+		while (!unique) {
+			quizid = Util.getNumericID(6);
+			try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+					Statement stmt = conn.createStatement()) {
+				ResultSet rs = stmt
+						.executeQuery("SELECT COUNT(quizid) AS count FROM quiz WHERE quizid='" + quizid + "'");
+				if (rs.next()) {
+					int count = rs.getInt("count");
+					if (count > 0)
+						continue;
+					else {
+						unique = true;
+					}
+				}
+				unique = true;
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
+
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			// int result =
+			stmt.executeUpdate("INSERT INTO quiz (quizid, quizname, username, timestamp) VALUES(" + quizid + ", '"
+					+ quizname + "', '" + username + "', '" + java.time.LocalDateTime.now() + "')");
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		return quizid;
+	}
+
+	public static User fetchUser(String username, String password, PrintWriter pw, HttpSession session) {
+		String sql = "SELECT * FROM users WHERE username=\'" + username + "\' AND password=\'" + password + "\'";
+		try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+				Statement stmt = conn.createStatement()) {
+			Class.forName(JDBC_DRIVER);
+			ResultSet rs = stmt.executeQuery(sql);
+			if (rs.next()) {
+				String uname = rs.getString("username");
+				String name = rs.getString("name");
+				String email = rs.getString("email");
+				String passwd = rs.getString("password");
+
+				if (username.equals(uname) && password.equals(passwd)) {
+
+					session.setAttribute("username", uname);
+					session.setAttribute("date", java.time.LocalDate.now());
+					session.setAttribute("time", java.time.LocalTime.now());
+
+					return new User(uname, name, email);
+				}
+				return null;
+			}
+			rs.close();
+			return null;
+		} catch (Exception e) {
+			pw.println(e.getMessage());
+			return null;
+		}
+	}
+	public static boolean addUser(String username, String password, String name, String email, PrintWriter pw) {
+		boolean flag=false;
+		try {
+			Class.forName(JDBC_DRIVER);
+			Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+			Statement stmt = conn.createStatement();
+			String sql = "INSERT INTO users (username, password, name, email) VALUES('" + username + "','" + password
+					+ "', '" + name + "', '" + email + "')";
+			//res = 0;
+			 
+				
+				int res = stmt.executeUpdate(sql);
+				if 
+					(res>0)
+					flag=true;
+				
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} 
+		
+		return flag;
+	}
+}
+
+
+MODELS:
+QUESTIONS:
+*FILLNBANK
+
+
+
+package models.questions;
+
+public class FillInBlank extends Question {
+	private String correctAnswer;
+
+	public FillInBlank(String question, String correctAnswer) {
+		super(question, QuestionType.FillInBlank);
+		this.correctAnswer = correctAnswer;
+	}
+
+	@Override
+	public String getQuestion() {
+		return question;
+	}
+	
+	public String getCorrectAnswer() {
+		return this.correctAnswer;
+	}
+}
+*MCQ:
+
+package models.questions;
+
+import java.util.Arrays;
+
+public class MCQ extends Question {
+	private String[] answers;
+	private String correctAnswer;
+
+	public MCQ(String question, String[] answers, String correctAnswer) {
+		super(question, QuestionType.MCQ);
+		this.answers = answers;
+		this.correctAnswer = correctAnswer;
+	}
+
+	@Override
+	public String getQuestion() {
+		return this.question;
+	}
+
+	public String[] getAnswers() {
+		return Arrays.copyOf(answers, 4);
+	}
+	
+	public String getCorrectAnswer() {
+		return correctAnswer;
+	}
+}
+* OpenQuestion:
+
+package models.questions;
+
+public class OpenQuestion extends Question {
+
+	public OpenQuestion(String question) {
+		super(question, QuestionType.Open);
+	}
+
+	@Override
+	public String getQuestion() {
+		return this.question;
+	}
+}
+
+* Question:
+package models.questions;
+
+public abstract class Question {
+	protected String question;
+	protected QuestionType type;
+	protected int qno;
+
+	public Question(String question, QuestionType type) {
+		this.question = question;
+		this.type = type;
+	}
+
+	public abstract String getQuestion();
+
+	public QuestionType getType() {
+		return this.type;
+	}
+	
+	@Override
+	public String toString() {
+		return this.question;
+	}
+}
+* QuestionType:
+
+package models.questions;
+
+public enum QuestionType {
+	MCQ, FillInBlank, Scale, Open
+}
+
+package models.questions;
+
+import java.util.Arrays;
+
+public class Scale extends Question {
+	private ScaleStatement[] statements;
+
+	public Scale(String question, String[] stmt) {
+		super(question, QuestionType.Scale);
+
+		stmt = Arrays.copyOf(stmt, 4);
+		statements = new ScaleStatement[4];
+		for (int i = 0; i < 4; i++) {
+			statements[i] = new ScaleStatement(stmt[i]);
+		}
+	}
+
+	@Override
+	public String getQuestion() {
+		return this.question;
+	}
+
+	public String getResponse(int statementIndex, int value) {
+		return statements[statementIndex].getResponse(value);
+	}
+
+	public ScaleStatement[] getStatements() {
+		return Arrays.copyOf(statements, 4);
+	}
+}
+
+* ScaleStatement:
+package models.questions;
+
+public class ScaleStatement {
+	public final String statement;
+	public final static int min = 1;
+	public final static int max = 5;
+	public final static String[] responses = { "Strongly Disagree", "Disagree", "Neither Agree not Disagree", "Agree",
+			"Strongly Agree" };
+
+	public ScaleStatement(String statement) {
+		this.statement = statement;
+	}
+
+	public String getResponse(int value) {
+		return responses[value - 1];
+	}
+}
+
+
+*SCORE:
+package models;
+
+public class Score {
+	public final String username;
+	public final int score;
+	public final int total;
+
+	public Score(String username, int score, int total) {
+		this.username = username;
+		this.score = score;
+		this.total = total;
+	}
+
+	@Override
+	public String toString() {
+		return username + ":" + score + ":" + total;
+	}
+}
+* User
+
+
+package models;
+
+public class User {
+	public final String username;
+	public final String name;
+	public final String email;
+
+	public User(String username, String name, String email) {
+		this.username = username;
+		this.name = name;
+		this.email = email;
+	}
+   
+	@Override
+	public String toString() {
+		return this.username;
+	}
+	
+}
+
+
+PAGES
+*ADDQUESTION:
+
+
+package pages;
+
+import java.io.IOException;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
+
+import db.Database;
+import models.questions.*;
+
+@WebServlet("/AddQuestion")
+public class AddQuestion extends HttpServlet {
+	private static final long serialVersionUID = 1L;
+
+	public AddQuestion() {
+		super();
+	}
+
+	protected void doGet(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		HttpSession session = request.getSession();
+		if (session.getAttribute("username") != null) {
+			String[] answers = { request.getParameter("a"), request.getParameter("b"), request.getParameter("c"),
+					request.getParameter("d") };
+			MCQ q = new MCQ(request.getParameter("q"), answers, request.getParameter("ca"));
+			Database.addQuestion(q, Integer.parseInt(request.getParameter("id")), -1);
+		}
+		
+		String referer = request.getHeader("referer");
+		int index = referer.indexOf("quiz.jsp");
+		response.sendRedirect(referer.substring(index));
+	}
+
+	protected void doPost(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		doGet(request, response);
+	}
+
+}
+*CREATEQUIZ:
+
+
+package pages;
+
+import java.io.IOException;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpSession;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.ServletException;
+import db.Database;
+
+@WebServlet("/CreateQuiz")
+public class CreateQuiz extends HttpServlet {
+	private static final long serialVersionUID = 1L;
+
+	public CreateQuiz() {
+		super();
+	}
+
+	protected void doGet(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		HttpSession session = request.getSession();
+		String quizname = request.getParameter("quizname");
+		Integer quizid = Database.getNumericId(session.getAttribute("username").toString(), quizname);
+		response.sendRedirect("quiz.jsp?id=" + quizid + "&name=" + quizname);
+	}
+
+	protected void doPost(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		doGet(request, response);
+	}
+
+}
+*DELETEQUESTION:
+
+package pages;
+
+import java.io.IOException;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpSession;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.ServletException;
+
+
+import db.Database;
+
+@WebServlet("/DeleteQuestion")
+public class DeleteQuestion extends HttpServlet {
+	private static final long serialVersionUID = 1L;
+
+	public DeleteQuestion() {
+		super();
+	}
+
+	protected void doPost(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		HttpSession session = request.getSession();
+		if (session.getAttribute("username") != null) {
+			String questionid = request.getParameter("id");
+			Database.deleteQuestion(questionid);
+		}
+
+		String referer = request.getHeader("referer");
+		int index = referer.indexOf("quiz.jsp");
+		response.sendRedirect(referer.substring(index));
+	}
+
+}
+*DELETEQUIZ:
+
+package pages;
+
+import java.io.IOException;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
+
+import db.Database;
+
+@WebServlet("/DeleteQuiz")
+public class DeleteQuiz extends HttpServlet {
+	private static final long serialVersionUID = 1L;
+       
+    public DeleteQuiz() {
+        super();
+    }
+
+	protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+		HttpSession session = request.getSession();
+		if(session.getAttribute("username") != null) {
+			String id = request.getParameter("id");
+			Database.deleteQuiz(id);
+		}
+		
+		response.sendRedirect("dashboard.jsp");
+	}
+}
+
+*LOGIN:
+package pages;
+
+import java.io.IOException;
+import java.io.PrintWriter;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpSession;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
+
+import db.Database;
+import models.User;
+
+@WebServlet({ "/Login", "/Login/" })
+public class Login extends HttpServlet {
+	private static final long serialVersionUID = 1L;
+
+	public void doPost(HttpServletRequest request, HttpServletResponse response) throws IOException, ServletException {
+		PrintWriter pw = response.getWriter();
+		HttpSession session = request.getSession();
+		response.setContentType("text/html");
+		String username = request.getParameter("username");
+		String password = request.getParameter("password");
+		User user = Database.fetchUser(username, password, pw, session);
+
+		if (session.getAttribute("username") == null || user == null) {
+			pw.println("<script>alert('Invalid Credentials!');</script>");
+		}
+		response.sendRedirect("dashboard.jsp");
+		pw.close();
+	}
+}
+
+*LOGOUT:
+
+
+package pages;
+import java.io.*;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpSession;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.ServletException;
+
+@WebServlet({ "/Logout", "/Logout/" })
+public class Logout extends HttpServlet {
+	private static final long serialVersionUID = 1L;
+
+	public void doGet(HttpServletRequest req, HttpServletResponse response) throws ServletException, IOException {
+        HttpSession session = req.getSession(true);
+        session.invalidate();
+
+        response.setContentType("text/html");
+
+        PrintWriter out = response.getWriter();
+        
+        response.sendRedirect("index.jsp");
+        out.close();
+    }
+}
+*REGISTER:
+package pages;
+
+import java.io.IOException;
+import java.io.PrintWriter;
+
+import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import db.Database;
+
+@WebServlet({ "/Register", "/Register/" })
+public class Register extends HttpServlet {
+	private static final long serialVersionUID = 1L;
+
+	protected void doGet(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		response.setContentType("text/html");
+		PrintWriter pw = response.getWriter();
+		String username = request.getParameter("username");
+		String password = request.getParameter("password");
+		String repassword = request.getParameter("repassword");
+
+		if (!password.equals(repassword)) {
+			pw.println("Passwords do not match!");
+			return;
+		}
+
+		String name = request.getParameter("name");
+		String email = request.getParameter("email");
+
+		if (Database.addUser(username, password, name, email, pw)) {
+			pw.println("<script>alert('Your Registration was successful! Login on the next page.');</script>");
+			response.sendRedirect("index.jsp");
+		} else {
+			pw.println("<script>alert('Some error occured! Please try again.');</script>");
+			response.sendRedirect("register.jsp");
+		}
+	}
+
+	protected void doPost(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		doGet(request, response);
+	}
+
+}
+
+*UPDATEQUESTION:
+package pages;
+
+import java.io.IOException;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
+
+import db.Database;
+import models.questions.MCQ;
+
+@WebServlet("/UpdateQuestion")
+public class UpdateQuestion extends HttpServlet {
+	private static final long serialVersionUID = 1L;
+
+	public UpdateQuestion() {
+		super();
+	}
+
+	protected void doPost(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		HttpSession session = request.getSession();
+		if (session.getAttribute("username") != null) {
+			String questionid = request.getParameter("id");
+			String question = request.getParameter("update_qname");
+			String[] answers = { request.getParameter("a"), request.getParameter("b"), request.getParameter("c"),
+					request.getParameter("d") };
+			MCQ q = new MCQ(question, answers, request.getParameter("ca"));
+			Database.updateQuestion(questionid, q);
+		}
+
+		String referer = request.getHeader("referer");
+		int index = referer.indexOf("quiz.jsp");
+		response.sendRedirect(referer.substring(index));
+	}
+
+}
+
+
+
+UTIL:
+*CHAT:
+
+
+
+package util;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import jakarta.websocket.OnClose;
+import jakarta.websocket.OnMessage;
+import jakarta.websocket.OnOpen;
+import jakarta.websocket.Session;
+import jakarta.websocket.server.ServerEndpoint;
+
+@ServerEndpoint("/Chat")
+public class Chat {
+	private static Set<Session> userSessions = Collections.newSetFromMap(new ConcurrentHashMap<Session, Boolean>());
+	
+	@OnOpen
+	public void onOpen(Session curSession) {
+		userSessions.add(curSession);
+	}
+
+	@OnClose
+	public void onClose(Session curSession) {
+		userSessions.remove(curSession);
+	}
+
+	@OnMessage
+	public void onMessage(String message, Session userSession) {
+		for(Session ses : userSessions)
+        {
+            ses.getAsyncRemote().sendText(message);
+        }
+	}
+}
+
+*GETANSWER:
+package util;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import jakarta.websocket.OnClose;
+import jakarta.websocket.OnMessage;
+import jakarta.websocket.OnOpen;
+import jakarta.websocket.Session;
+import jakarta.websocket.server.ServerEndpoint;
+
+@ServerEndpoint("/GetAnswer")
+public class GetAnswer {
+	private static Set<Session> userSessions = Collections.newSetFromMap(new ConcurrentHashMap<Session, Boolean>());
+
+	@OnOpen
+	public void onOpen(Session curSession) {
+		userSessions.add(curSession);
+	}
+
+	@OnClose
+	public void onClose(Session curSession) {
+		userSessions.remove(curSession);
+	}
+
+	@OnMessage
+	public void onMessage(String message, Session userSession) {
+		String crtans = db.Database.getCorrectAnswer(message);
+		String ans;
+
+		switch (crtans) {
+		case "1":
+			ans = "A";
+			break;
+		case "2":
+			ans = "B";
+			break;
+		case "3":
+			ans = "C";
+			break;
+		case "4":
+			ans = "D";
+			break;
+		default:
+			ans = crtans;
+			break;
+		}
+
+		for (Session ses : userSessions) {
+			ses.getAsyncRemote().sendText(ans);
+		}
+	}
+}
+*GETDETAILS:
+package util;
+
+import java.io.IOException;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import jakarta.websocket.OnClose;
+import jakarta.websocket.OnMessage;
+import jakarta.websocket.OnOpen;
+import jakarta.websocket.Session;
+import jakarta.websocket.server.ServerEndpoint;
+
+@ServerEndpoint("/GetDetails")
+public class GetDetails {
+	private static Set<Session> userSessions = Collections.newSetFromMap(new ConcurrentHashMap<Session, Boolean>());
+
+	@OnOpen
+	public void onOpen(Session curSession) {
+		userSessions.add(curSession);
+	}
+
+	@OnClose
+	public void onClose(Session curSession) {
+		userSessions.remove(curSession);
+	}
+
+	@OnMessage
+	public void onMessage(String message, Session userSession) {
+		String response = "";
+
+		int[] result = db.Database.getPerQuestionResult(message);
+		response = result[0] + "," + result[1];
+
+		for (Session ses : userSessions) {
+			if (ses.isOpen()) {
+				try {
+					ses.getBasicRemote().sendText(response);
+				} catch (IOException e) {
+					System.out.println("Error on GetDetails: " + e.getMessage());
+					e.printStackTrace();
+				}
+			} else {
+				System.out.println("--Closed Session Details--");
+			}
+		}
+	}
+}
+
+*GETSCORES:
+package util;
+
+import java.io.IOException;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import jakarta.websocket.OnClose;
+import jakarta.websocket.OnMessage;
+import jakarta.websocket.OnOpen;
+import jakarta.websocket.Session;
+import jakarta.websocket.server.ServerEndpoint;
+
+@ServerEndpoint("/GetScores")
+public class GetScores {
+	private static Set<Session> userSessions = Collections.newSetFromMap(new ConcurrentHashMap<Session, Boolean>());
+
+	@OnOpen
+	public void onOpen(Session curSession) {
+		userSessions.add(curSession);
+	}
+
+	@OnClose
+	public void onClose(Session curSession) {
+		userSessions.remove(curSession);
+	}
+
+	@OnMessage
+	public void onMessage(String message, Session userSession) {
+		String response = "";
+		String quizid = message.substring(3);
+		List<models.Score> scores = db.Database.getScoreboard(quizid);
+		for (models.Score s : scores) {
+			response += s + ",";
+		}
+		response = response.substring(0, response.length() - 1);
+
+		for (Session ses : userSessions) {
+			if (ses.isOpen()) {
+				try {
+					ses.getBasicRemote().sendText(response);
+				} catch (IOException e) {
+					System.out.println("Error on GetScores: " + e.getMessage());
+					e.printStackTrace();
+				}
+			} else {
+				System.out.println("--Closed Session on Scores--");
+			}
+		}
+	}
+}
+
+*SENDQUESTION:
+package util;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import jakarta.websocket.OnClose;
+import jakarta.websocket.OnMessage;
+import jakarta.websocket.OnOpen;
+import jakarta.websocket.Session;
+import jakarta.websocket.server.ServerEndpoint;
+
+@ServerEndpoint("/SendQuestion")
+public class SendQuestion {
+	private static Set<Session> userSessions = Collections.newSetFromMap(new ConcurrentHashMap<Session, Boolean>());
+	
+	@OnOpen
+	public void onOpen(Session curSession) {
+		userSessions.add(curSession);
+	}
+
+	@OnClose
+	public void onClose(Session curSession) {
+		userSessions.remove(curSession);
+	}
+
+	@OnMessage
+	public void onMessage(String message, Session userSession) {
+		for (Session ses : userSessions) {
+			ses.getAsyncRemote().sendText(message);
+		}
+	}
+}
+*SUBMITANSWER:
+package util;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import jakarta.websocket.OnClose;
+import jakarta.websocket.OnMessage;
+import jakarta.websocket.OnOpen;
+import jakarta.websocket.Session;
+import jakarta.websocket.server.ServerEndpoint;
+
+@ServerEndpoint("/SubmitAnswer")
+public class SubmitAnswer {
+	private static Set<Session> userSessions = Collections.newSetFromMap(new ConcurrentHashMap<Session, Boolean>());
+	
+	@OnOpen
+	public void onOpen(Session curSession) {
+		userSessions.add(curSession);
+	}
+
+	@OnClose
+	public void onClose(Session curSession) {
+		userSessions.remove(curSession);
+	}
+
+	@OnMessage
+	public void onMessage(String message, Session userSession) {
+		String[] msg = message.split(",");
+		System.out.println(message);
+		db.Database.submitAnswer(msg[0], msg[1], msg[2], Integer.parseInt(msg[3]));
+	}
+}
+
+*SUBMITFEEDBACK:
+package util;
+
+import java.io.IOException;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+@WebServlet("/SubmitFeedback")
+public class SubmitFeedback extends HttpServlet {
+	private static final long serialVersionUID = 1L;
+
+    public SubmitFeedback() {
+        super();
+    }
+
+	protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+		String quizid = request.getParameter("quizid");
+		String username = request.getParameter("username");
+		int rating = Integer.parseInt(request.getParameter("rating"));
+		
+		db.Database.submitFeedback(quizid, username, rating);
+		
+		response.sendRedirect("dashboard.jsp");
+	}
+
+}
+*UPLOADQUESTIONCSV:
+
+
+package util;
+
+import java.io.*;
+import java.util.*;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.apache.commons.fileupload.FileItem;
+import org.apache.commons.fileupload.disk.DiskFileItemFactory;
+import org.apache.commons.fileupload.servlet.ServletFileUpload;
+import jakarta.servlet.annotation.WebServlet;
+import models.questions.*;
+
+@WebServlet("/UploadQuestionsCSV")
+public class UploadQuestionsCSV extends HttpServlet {
+	private static final long serialVersionUID = 1L;
+	private String uploadedFilename = null;
+	private static String UPLOAD_PATH = "uploads";
+
+	public UploadQuestionsCSV() {
+		super();
+	}
+
+	public void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
+		doPost(request, response);
+	}
+
+	private void readData(String quizid) {
+		if (uploadedFilename == null)
+			return;
+		File file = new File(uploadedFilename);
+		try (BufferedReader reader = new BufferedReader(new FileReader(file));) {
+			String line = reader.readLine();
+			// int id = Integer.parseInt(quizid);
+
+			int i = 1;
+			while ((line = reader.readLine()) != null) {
+				String[] qs = line.split(",");
+				db.Database.addQuestion(new MCQ(qs[0], new String[] { qs[1], qs[2], qs[3], qs[4] }, qs[5]),
+						Integer.parseInt(quizid), i);
+				i++;
+			}
+		} catch (Exception e) {
+			e.printStackTrace(System.out);
+		} finally {
+			file.delete();
+		}
+	}
+
+	public void doPost(HttpServletRequest request, HttpServletResponse response) throws IOException {
+		
+		UPLOAD_PATH = getServletContext().getRealPath("") + File.separator + UPLOAD_PATH;
+		System.out.println(UPLOAD_PATH);
+		
+		String quizid = request.getParameter("quizid");
+		System.out.println("QUIZID: " + quizid);
+		String file_name = null;
+		response.setContentType("text/html");
+		PrintWriter out = response.getWriter();
+		boolean isMultipartContent = ServletFileUpload.isMultipartContent((javax.servlet.http.HttpServletRequest) request);
+		if (!isMultipartContent) {
+			return;
+		}
+		DiskFileItemFactory factory = new DiskFileItemFactory();
+		factory.setRepository(new File(UPLOAD_PATH)); 
+		ServletFileUpload upload = new ServletFileUpload(factory);
+		
+		try {
+			List<FileItem> fields = upload.parseRequest((javax.servlet.http.HttpServletRequest) request);
+			Iterator<FileItem> it = fields.iterator();
+			if (!it.hasNext()) {
+				return;
+			}
+
+			while (it.hasNext()) {
+				FileItem fileItem = it.next();
+				System.out.println("Name: " + fileItem.getName());
+				boolean isFormField = fileItem.isFormField();
+				if (isFormField) {
+					String fieldname = fileItem.getFieldName();
+					String fieldvalue = fileItem.getString();
+					if (fieldname.equals("quizid"))
+						quizid = fieldvalue;
+					if (file_name == null) {
+						if (fileItem.getFieldName().equals("questionsFile")) {
+							file_name = fileItem.getString();
+						}
+					}
+				} else {
+					if (fileItem.getSize() > 0) {
+						uploadedFilename = UPLOAD_PATH + fileItem.getName();
+						// uploadedFilename = "D:\\uploads\\" + fileItem.getName();
+						fileItem.write(new File(uploadedFilename));
+						readData(quizid);
+					}
+				}
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		} finally {
+			String referer = request.getHeader("referer");
+			int index = referer.indexOf("quiz.jsp");
+			response.sendRedirect(referer.substring(index));
+			out.close();
+		}
+	}
+}
+*UTIL:
+package util;
+
+public class Util {
+	public static String getUniqueID(int n) {
+        String AlphaNumericString = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" + "0123456789" + "abcdefghijklmnopqrstuvxyz";
+        StringBuilder sb = new StringBuilder(n);
+
+        for (int i = 0; i < n; i++) {
+            int index = (int) (AlphaNumericString.length() * Math.random());
+            sb.append(AlphaNumericString.charAt(index));
+        }
+
+        return sb.toString();
+    }
+	
+	public static Integer getNumericID(int n) {
+        String NumericString = "123456789";
+        StringBuilder sb = new StringBuilder(n);
+
+        for (int i = 0; i < n; i++) {
+            int index = (int) (NumericString.length() * Math.random());
+            sb.append(NumericString.charAt(index));
+        }
+
+        return Integer.parseInt(sb.toString());
+    }
+}
+
+
+
+
+
+WEBAPP:
+CSS:
+*ANIME:
+
+
+
+@charset "UTF-8";
+
+
+.animated {
+  animation-duration: 1s;
+  animation-fill-mode: both;
+}
+
+.animated.infinite {
+  animation-iteration-count: infinite;
+}
+
+.animated.hinge {
+  animation-duration: 2s;
+}
+
+.animated.flipOutX,
+.animated.flipOutY,
+.animated.bounceIn,
+.animated.bounceOut {
+  animation-duration: .75s;
+}
+
+@keyframes bounce {
+  from, 20%, 53%, 80%, to {
+    animation-timing-function: cubic-bezier(0.215, 0.610, 0.355, 1.000);
+    transform: translate3d(0,0,0);
+  }
+
+  40%, 43% {
+    animation-timing-function: cubic-bezier(0.755, 0.050, 0.855, 0.060);
+    transform: translate3d(0, -30px, 0);
+  }
+
+  70% {
+    animation-timing-function: cubic-bezier(0.755, 0.050, 0.855, 0.060);
+    transform: translate3d(0, -15px, 0);
+  }
+
+  90% {
+    transform: translate3d(0,-4px,0);
+  }
+}
+
+.bounce {
+  animation-name: bounce;
+  transform-origin: center bottom;
+}
+
+@keyframes flash {
+  from, 50%, to {
+    opacity: 1;
+  }
+
+  25%, 75% {
+    opacity: 0;
+  }
+}
+
+.flash {
+  animation-name: flash;
+}
+
+/* originally authored by Nick Pettit - https://github.com/nickpettit/glide */
+
+@keyframes pulse {
+  from {
+    transform: scale3d(1, 1, 1);
+  }
+
+  50% {
+    transform: scale3d(1.05, 1.05, 1.05);
+  }
+
+  to {
+    transform: scale3d(1, 1, 1);
+  }
+}
+
+.pulse {
+  animation-name: pulse;
+}
+
+@keyframes rubberBand {
+  from {
+    transform: scale3d(1, 1, 1);
+  }
+
+  30% {
+    transform: scale3d(1.25, 0.75, 1);
+  }
+
+  40% {
+    transform: scale3d(0.75, 1.25, 1);
+  }
+
+  50% {
+    transform: scale3d(1.15, 0.85, 1);
+  }
+
+  65% {
+    transform: scale3d(.95, 1.05, 1);
+  }
+
+  75% {
+    transform: scale3d(1.05, .95, 1);
+  }
+
+  to {
+    transform: scale3d(1, 1, 1);
+  }
+}
+
+.rubberBand {
+  animation-name: rubberBand;
+}
+
+@keyframes shake {
+  from, to {
+    transform: translate3d(0, 0, 0);
+  }
+
+  10%, 30%, 50%, 70%, 90% {
+    transform: translate3d(-10px, 0, 0);
+  }
+
+  20%, 40%, 60%, 80% {
+    transform: translate3d(10px, 0, 0);
+  }
+}
+
+.shake {
+  animation-name: shake;
+}
+
+@keyframes headShake {
+  0% {
+    transform: translateX(0);
+  }
+
+  6.5% {
+    transform: translateX(-6px) rotateY(-9deg);
+  }
+
+  18.5% {
+    transform: translateX(5px) rotateY(7deg);
+  }
+
+  31.5% {
+    transform: translateX(-3px) rotateY(-5deg);
+  }
+
+  43.5% {
+    transform: translateX(2px) rotateY(3deg);
+  }
+
+  50% {
+    transform: translateX(0);
+  }
+}
+
+.headShake {
+  animation-timing-function: ease-in-out;
+  animation-name: headShake;
+}
+
+@keyframes swing {
+  20% {
+    transform: rotate3d(0, 0, 1, 15deg);
+  }
+
+  40% {
+    transform: rotate3d(0, 0, 1, -10deg);
+  }
+
+  60% {
+    transform: rotate3d(0, 0, 1, 5deg);
+  }
+
+  80% {
+    transform: rotate3d(0, 0, 1, -5deg);
+  }
+
+  to {
+    transform: rotate3d(0, 0, 1, 0deg);
+  }
+}
+
+.swing {
+  transform-origin: top center;
+  animation-name: swing;
+}
+
+@keyframes tada {
+  from {
+    transform: scale3d(1, 1, 1);
+  }
+
+  10%, 20% {
+    transform: scale3d(.9, .9, .9) rotate3d(0, 0, 1, -3deg);
+  }
+
+  30%, 50%, 70%, 90% {
+    transform: scale3d(1.1, 1.1, 1.1) rotate3d(0, 0, 1, 3deg);
+  }
+
+  40%, 60%, 80% {
+    transform: scale3d(1.1, 1.1, 1.1) rotate3d(0, 0, 1, -3deg);
+  }
+
+  to {
+    transform: scale3d(1, 1, 1);
+  }
+}
+
+.tada {
+  animation-name: tada;
+}
+
+/* originally authored by Nick Pettit - https://github.com/nickpettit/glide */
+
+@keyframes wobble {
+  from {
+    transform: none;
+  }
+
+  15% {
+    transform: translate3d(-25%, 0, 0) rotate3d(0, 0, 1, -5deg);
+  }
+
+  30% {
+    transform: translate3d(20%, 0, 0) rotate3d(0, 0, 1, 3deg);
+  }
+
+  45% {
+    transform: translate3d(-15%, 0, 0) rotate3d(0, 0, 1, -3deg);
+  }
+
+  60% {
+    transform: translate3d(10%, 0, 0) rotate3d(0, 0, 1, 2deg);
+  }
+
+  75% {
+    transform: translate3d(-5%, 0, 0) rotate3d(0, 0, 1, -1deg);
+  }
+
+  to {
+    transform: none;
+  }
+}
+
+.wobble {
+  animation-name: wobble;
+}
+
+@keyframes jello {
+  from, 11.1%, to {
+    transform: none;
+  }
+
+  22.2% {
+    transform: skewX(-12.5deg) skewY(-12.5deg);
+  }
+
+  33.3% {
+    transform: skewX(6.25deg) skewY(6.25deg);
+  }
+
+  44.4% {
+    transform: skewX(-3.125deg) skewY(-3.125deg);
+  }
+
+  55.5% {
+    transform: skewX(1.5625deg) skewY(1.5625deg);
+  }
+
+  66.6% {
+    transform: skewX(-0.78125deg) skewY(-0.78125deg);
+  }
+
+  77.7% {
+    transform: skewX(0.390625deg) skewY(0.390625deg);
+  }
+
+  88.8% {
+    transform: skewX(-0.1953125deg) skewY(-0.1953125deg);
+  }
+}
+
+.jello {
+  animation-name: jello;
+  transform-origin: center;
+}
+
+@keyframes bounceIn {
+  from, 20%, 40%, 60%, 80%, to {
+    animation-timing-function: cubic-bezier(0.215, 0.610, 0.355, 1.000);
+  }
+
+  0% {
+    opacity: 0;
+    transform: scale3d(.3, .3, .3);
+  }
+
+  20% {
+    transform: scale3d(1.1, 1.1, 1.1);
+  }
+
+  40% {
+    transform: scale3d(.9, .9, .9);
+  }
+
+  60% {
+    opacity: 1;
+    transform: scale3d(1.03, 1.03, 1.03);
+  }
+
+  80% {
+    transform: scale3d(.97, .97, .97);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale3d(1, 1, 1);
+  }
+}
+
+.bounceIn {
+  animation-name: bounceIn;
+}
+
+@keyframes bounceInDown {
+  from, 60%, 75%, 90%, to {
+    animation-timing-function: cubic-bezier(0.215, 0.610, 0.355, 1.000);
+  }
+
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -3000px, 0);
+  }
+
+  60% {
+    opacity: 1;
+    transform: translate3d(0, 25px, 0);
+  }
+
+  75% {
+    transform: translate3d(0, -10px, 0);
+  }
+
+  90% {
+    transform: translate3d(0, 5px, 0);
+  }
+
+  to {
+    transform: none;
+  }
+}
+
+.bounceInDown {
+  animation-name: bounceInDown;
+}
+
+@keyframes bounceInLeft {
+  from, 60%, 75%, 90%, to {
+    animation-timing-function: cubic-bezier(0.215, 0.610, 0.355, 1.000);
+  }
+
+  0% {
+    opacity: 0;
+    transform: translate3d(-3000px, 0, 0);
+  }
+
+  60% {
+    opacity: 1;
+    transform: translate3d(25px, 0, 0);
+  }
+
+  75% {
+    transform: translate3d(-10px, 0, 0);
+  }
+
+  90% {
+    transform: translate3d(5px, 0, 0);
+  }
+
+  to {
+    transform: none;
+  }
+}
+
+.bounceInLeft {
+  animation-name: bounceInLeft;
+}
+
+@keyframes bounceInRight {
+  from, 60%, 75%, 90%, to {
+    animation-timing-function: cubic-bezier(0.215, 0.610, 0.355, 1.000);
+  }
+
+  from {
+    opacity: 0;
+    transform: translate3d(3000px, 0, 0);
+  }
+
+  60% {
+    opacity: 1;
+    transform: translate3d(-25px, 0, 0);
+  }
+
+  75% {
+    transform: translate3d(10px, 0, 0);
+  }
+
+  90% {
+    transform: translate3d(-5px, 0, 0);
+  }
+
+  to {
+    transform: none;
+  }
+}
+
+.bounceInRight {
+  animation-name: bounceInRight;
+}
+
+@keyframes bounceInUp {
+  from, 60%, 75%, 90%, to {
+    animation-timing-function: cubic-bezier(0.215, 0.610, 0.355, 1.000);
+  }
+
+  from {
+    opacity: 0;
+    transform: translate3d(0, 3000px, 0);
+  }
+
+  60% {
+    opacity: 1;
+    transform: translate3d(0, -20px, 0);
+  }
+
+  75% {
+    transform: translate3d(0, 10px, 0);
+  }
+
+  90% {
+    transform: translate3d(0, -5px, 0);
+  }
+
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.bounceInUp {
+  animation-name: bounceInUp;
+}
+
+@keyframes bounceOut {
+  20% {
+    transform: scale3d(.9, .9, .9);
+  }
+
+  50%, 55% {
+    opacity: 1;
+    transform: scale3d(1.1, 1.1, 1.1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale3d(.3, .3, .3);
+  }
+}
+
+.bounceOut {
+  animation-name: bounceOut;
+}
+
+@keyframes bounceOutDown {
+  20% {
+    transform: translate3d(0, 10px, 0);
+  }
+
+  40%, 45% {
+    opacity: 1;
+    transform: translate3d(0, -20px, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(0, 2000px, 0);
+  }
+}
+
+.bounceOutDown {
+  animation-name: bounceOutDown;
+}
+
+@keyframes bounceOutLeft {
+  20% {
+    opacity: 1;
+    transform: translate3d(20px, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(-2000px, 0, 0);
+  }
+}
+
+.bounceOutLeft {
+  animation-name: bounceOutLeft;
+}
+
+@keyframes bounceOutRight {
+  20% {
+    opacity: 1;
+    transform: translate3d(-20px, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(2000px, 0, 0);
+  }
+}
+
+.bounceOutRight {
+  animation-name: bounceOutRight;
+}
+
+@keyframes bounceOutUp {
+  20% {
+    transform: translate3d(0, -10px, 0);
+  }
+
+  40%, 45% {
+    opacity: 1;
+    transform: translate3d(0, 20px, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(0, -2000px, 0);
+  }
+}
+
+.bounceOutUp {
+  animation-name: bounceOutUp;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.fadeIn {
+  animation-name: fadeIn;
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -100%, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fadeInDown {
+  animation-name: fadeInDown;
+}
+
+@keyframes fadeInDownBig {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -2000px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fadeInDownBig {
+  animation-name: fadeInDownBig;
+}
+
+@keyframes fadeInLeft {
+  from {
+    opacity: 0;
+    transform: translate3d(-100%, 0, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fadeInLeft {
+  animation-name: fadeInLeft;
+}
+
+@keyframes fadeInLeftBig {
+  from {
+    opacity: 0;
+    transform: translate3d(-2000px, 0, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fadeInLeftBig {
+  animation-name: fadeInLeftBig;
+}
+
+@keyframes fadeInRight {
+  from {
+    opacity: 0;
+    transform: translate3d(100%, 0, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fadeInRight {
+  animation-name: fadeInRight;
+}
+
+@keyframes fadeInRightBig {
+  from {
+    opacity: 0;
+    transform: translate3d(2000px, 0, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fadeInRightBig {
+  animation-name: fadeInRightBig;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 100%, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fadeInUp {
+  animation-name: fadeInUp;
+}
+
+@keyframes fadeInUpBig {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 2000px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fadeInUpBig {
+  animation-name: fadeInUpBig;
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+.fadeOut {
+  animation-name: fadeOut;
+}
+
+@keyframes fadeOutDown {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(0, 100%, 0);
+  }
+}
+
+.fadeOutDown {
+  animation-name: fadeOutDown;
+}
+
+@keyframes fadeOutDownBig {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(0, 2000px, 0);
+  }
+}
+
+.fadeOutDownBig {
+  animation-name: fadeOutDownBig;
+}
+
+@keyframes fadeOutLeft {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(-100%, 0, 0);
+  }
+}
+
+.fadeOutLeft {
+  animation-name: fadeOutLeft;
+}
+
+@keyframes fadeOutLeftBig {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(-2000px, 0, 0);
+  }
+}
+
+.fadeOutLeftBig {
+  animation-name: fadeOutLeftBig;
+}
+
+@keyframes fadeOutRight {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+.fadeOutRight {
+  animation-name: fadeOutRight;
+}
+
+@keyframes fadeOutRightBig {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(2000px, 0, 0);
+  }
+}
+
+.fadeOutRightBig {
+  animation-name: fadeOutRightBig;
+}
+
+@keyframes fadeOutUp {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(0, -100%, 0);
+  }
+}
+
+.fadeOutUp {
+  animation-name: fadeOutUp;
+}
+
+@keyframes fadeOutUpBig {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(0, -2000px, 0);
+  }
+}
+
+.fadeOutUpBig {
+  animation-name: fadeOutUpBig;
+}
+
+@keyframes flip {
+  from {
+    transform: perspective(400px) rotate3d(0, 1, 0, -360deg);
+    animation-timing-function: ease-out;
+  }
+
+  40% {
+    transform: perspective(400px) translate3d(0, 0, 150px) rotate3d(0, 1, 0, -190deg);
+    animation-timing-function: ease-out;
+  }
+
+  50% {
+    transform: perspective(400px) translate3d(0, 0, 150px) rotate3d(0, 1, 0, -170deg);
+    animation-timing-function: ease-in;
+  }
+
+  80% {
+    transform: perspective(400px) scale3d(.95, .95, .95);
+    animation-timing-function: ease-in;
+  }
+
+  to {
+    transform: perspective(400px);
+    animation-timing-function: ease-in;
+  }
+}
+
+.animated.flip {
+  -webkit-backface-visibility: visible;
+  backface-visibility: visible;
+  animation-name: flip;
+}
+
+@keyframes flipInX {
+  from {
+    transform: perspective(400px) rotate3d(1, 0, 0, 90deg);
+    animation-timing-function: ease-in;
+    opacity: 0;
+  }
+
+  40% {
+    transform: perspective(400px) rotate3d(1, 0, 0, -20deg);
+    animation-timing-function: ease-in;
+  }
+
+  60% {
+    transform: perspective(400px) rotate3d(1, 0, 0, 10deg);
+    opacity: 1;
+  }
+
+  80% {
+    transform: perspective(400px) rotate3d(1, 0, 0, -5deg);
+  }
+
+  to {
+    transform: perspective(400px);
+  }
+}
+
+.flipInX {
+  -webkit-backface-visibility: visible !important;
+  backface-visibility: visible !important;
+  animation-name: flipInX;
+}
+
+@keyframes flipInY {
+  from {
+    transform: perspective(400px) rotate3d(0, 1, 0, 90deg);
+    animation-timing-function: ease-in;
+    opacity: 0;
+  }
+
+  40% {
+    transform: perspective(400px) rotate3d(0, 1, 0, -20deg);
+    animation-timing-function: ease-in;
+  }
+
+  60% {
+    transform: perspective(400px) rotate3d(0, 1, 0, 10deg);
+    opacity: 1;
+  }
+
+  80% {
+    transform: perspective(400px) rotate3d(0, 1, 0, -5deg);
+  }
+
+  to {
+    transform: perspective(400px);
+  }
+}
+
+.flipInY {
+  -webkit-backface-visibility: visible !important;
+  backface-visibility: visible !important;
+  animation-name: flipInY;
+}
+
+@keyframes flipOutX {
+  from {
+    transform: perspective(400px);
+  }
+
+  30% {
+    transform: perspective(400px) rotate3d(1, 0, 0, -20deg);
+    opacity: 1;
+  }
+
+  to {
+    transform: perspective(400px) rotate3d(1, 0, 0, 90deg);
+    opacity: 0;
+  }
+}
+
+.flipOutX {
+  animation-name: flipOutX;
+  -webkit-backface-visibility: visible !important;
+  backface-visibility: visible !important;
+}
+
+@keyframes flipOutY {
+  from {
+    transform: perspective(400px);
+  }
+
+  30% {
+    transform: perspective(400px) rotate3d(0, 1, 0, -15deg);
+    opacity: 1;
+  }
+
+  to {
+    transform: perspective(400px) rotate3d(0, 1, 0, 90deg);
+    opacity: 0;
+  }
+}
+
+.flipOutY {
+  -webkit-backface-visibility: visible !important;
+  backface-visibility: visible !important;
+  animation-name: flipOutY;
+}
+
+@keyframes lightSpeedIn {
+  from {
+    transform: translate3d(100%, 0, 0) skewX(-30deg);
+    opacity: 0;
+  }
+
+  60% {
+    transform: skewX(20deg);
+    opacity: 1;
+  }
+
+  80% {
+    transform: skewX(-5deg);
+    opacity: 1;
+  }
+
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.lightSpeedIn {
+  animation-name: lightSpeedIn;
+  animation-timing-function: ease-out;
+}
+
+@keyframes lightSpeedOut {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    transform: translate3d(100%, 0, 0) skewX(30deg);
+    opacity: 0;
+  }
+}
+
+.lightSpeedOut {
+  animation-name: lightSpeedOut;
+  animation-timing-function: ease-in;
+}
+
+@keyframes rotateIn {
+  from {
+    transform-origin: center;
+    transform: rotate3d(0, 0, 1, -200deg);
+    opacity: 0;
+  }
+
+  to {
+    transform-origin: center;
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.rotateIn {
+  animation-name: rotateIn;
+}
+
+@keyframes rotateInDownLeft {
+  from {
+    transform-origin: left bottom;
+    transform: rotate3d(0, 0, 1, -45deg);
+    opacity: 0;
+  }
+
+  to {
+    transform-origin: left bottom;
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.rotateInDownLeft {
+  animation-name: rotateInDownLeft;
+}
+
+@keyframes rotateInDownRight {
+  from {
+    transform-origin: right bottom;
+    transform: rotate3d(0, 0, 1, 45deg);
+    opacity: 0;
+  }
+
+  to {
+    transform-origin: right bottom;
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.rotateInDownRight {
+  animation-name: rotateInDownRight;
+}
+
+@keyframes rotateInUpLeft {
+  from {
+    transform-origin: left bottom;
+    transform: rotate3d(0, 0, 1, 45deg);
+    opacity: 0;
+  }
+
+  to {
+    transform-origin: left bottom;
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.rotateInUpLeft {
+  animation-name: rotateInUpLeft;
+}
+
+@keyframes rotateInUpRight {
+  from {
+    transform-origin: right bottom;
+    transform: rotate3d(0, 0, 1, -90deg);
+    opacity: 0;
+  }
+
+  to {
+    transform-origin: right bottom;
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.rotateInUpRight {
+  animation-name: rotateInUpRight;
+}
+
+@keyframes rotateOut {
+  from {
+    transform-origin: center;
+    opacity: 1;
+  }
+
+  to {
+    transform-origin: center;
+    transform: rotate3d(0, 0, 1, 200deg);
+    opacity: 0;
+  }
+}
+
+.rotateOut {
+  animation-name: rotateOut;
+}
+
+@keyframes rotateOutDownLeft {
+  from {
+    transform-origin: left bottom;
+    opacity: 1;
+  }
+
+  to {
+    transform-origin: left bottom;
+    transform: rotate3d(0, 0, 1, 45deg);
+    opacity: 0;
+  }
+}
+
+.rotateOutDownLeft {
+  animation-name: rotateOutDownLeft;
+}
+
+@keyframes rotateOutDownRight {
+  from {
+    transform-origin: right bottom;
+    opacity: 1;
+  }
+
+  to {
+    transform-origin: right bottom;
+    transform: rotate3d(0, 0, 1, -45deg);
+    opacity: 0;
+  }
+}
+
+.rotateOutDownRight {
+  animation-name: rotateOutDownRight;
+}
+
+@keyframes rotateOutUpLeft {
+  from {
+    transform-origin: left bottom;
+    opacity: 1;
+  }
+
+  to {
+    transform-origin: left bottom;
+    transform: rotate3d(0, 0, 1, -45deg);
+    opacity: 0;
+  }
+}
+
+.rotateOutUpLeft {
+  animation-name: rotateOutUpLeft;
+}
+
+@keyframes rotateOutUpRight {
+  from {
+    transform-origin: right bottom;
+    opacity: 1;
+  }
+
+  to {
+    transform-origin: right bottom;
+    transform: rotate3d(0, 0, 1, 90deg);
+    opacity: 0;
+  }
+}
+
+.rotateOutUpRight {
+  animation-name: rotateOutUpRight;
+}
+
+@keyframes hinge {
+  0% {
+    transform-origin: top left;
+    animation-timing-function: ease-in-out;
+  }
+
+  20%, 60% {
+    transform: rotate3d(0, 0, 1, 80deg);
+    transform-origin: top left;
+    animation-timing-function: ease-in-out;
+  }
+
+  40%, 80% {
+    transform: rotate3d(0, 0, 1, 60deg);
+    transform-origin: top left;
+    animation-timing-function: ease-in-out;
+    opacity: 1;
+  }
+
+  to {
+    transform: translate3d(0, 700px, 0);
+    opacity: 0;
+  }
+}
+
+.hinge {
+  animation-name: hinge;
+}
+
+@keyframes jackInTheBox {
+  from {
+    opacity: 0;
+    transform: scale(0.1) rotate(30deg);
+    transform-origin: center bottom;
+  }
+
+  50% {
+    transform: rotate(-10deg);
+  }
+
+  70% {
+    transform: rotate(3deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.jackInTheBox {
+  animation-name: jackInTheBox;
+}
+
+/* originally authored by Nick Pettit - https://github.com/nickpettit/glide */
+
+@keyframes rollIn {
+  from {
+    opacity: 0;
+    transform: translate3d(-100%, 0, 0) rotate3d(0, 0, 1, -120deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rollIn {
+  animation-name: rollIn;
+}
+
+/* originally authored by Nick Pettit - https://github.com/nickpettit/glide */
+
+@keyframes rollOut {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(100%, 0, 0) rotate3d(0, 0, 1, 120deg);
+  }
+}
+
+.rollOut {
+  animation-name: rollOut;
+}
+
+@keyframes zoomIn {
+  from {
+    opacity: 0;
+    transform: scale3d(.3, .3, .3);
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+.zoomIn {
+  animation-name: zoomIn;
+}
+
+@keyframes zoomInDown {
+  from {
+    opacity: 0;
+    transform: scale3d(.1, .1, .1) translate3d(0, -1000px, 0);
+    animation-timing-function: cubic-bezier(0.550, 0.055, 0.675, 0.190);
+  }
+
+  60% {
+    opacity: 1;
+    transform: scale3d(.475, .475, .475) translate3d(0, 60px, 0);
+    animation-timing-function: cubic-bezier(0.175, 0.885, 0.320, 1);
+  }
+}
+
+.zoomInDown {
+  animation-name: zoomInDown;
+}
+
+@keyframes zoomInLeft {
+  from {
+    opacity: 0;
+    transform: scale3d(.1, .1, .1) translate3d(-1000px, 0, 0);
+    animation-timing-function: cubic-bezier(0.550, 0.055, 0.675, 0.190);
+  }
+
+  60% {
+    opacity: 1;
+    transform: scale3d(.475, .475, .475) translate3d(10px, 0, 0);
+    animation-timing-function: cubic-bezier(0.175, 0.885, 0.320, 1);
+  }
+}
+
+.zoomInLeft {
+  animation-name: zoomInLeft;
+}
+
+@keyframes zoomInRight {
+  from {
+    opacity: 0;
+    transform: scale3d(.1, .1, .1) translate3d(1000px, 0, 0);
+    animation-timing-function: cubic-bezier(0.550, 0.055, 0.675, 0.190);
+  }
+
+  60% {
+    opacity: 1;
+    transform: scale3d(.475, .475, .475) translate3d(-10px, 0, 0);
+    animation-timing-function: cubic-bezier(0.175, 0.885, 0.320, 1);
+  }
+}
+
+.zoomInRight {
+  animation-name: zoomInRight;
+}
+
+@keyframes zoomInUp {
+  from {
+    opacity: 0;
+    transform: scale3d(.1, .1, .1) translate3d(0, 1000px, 0);
+    animation-timing-function: cubic-bezier(0.550, 0.055, 0.675, 0.190);
+  }
+
+  60% {
+    opacity: 1;
+    transform: scale3d(.475, .475, .475) translate3d(0, -60px, 0);
+    animation-timing-function: cubic-bezier(0.175, 0.885, 0.320, 1);
+  }
+}
+
+.zoomInUp {
+  animation-name: zoomInUp;
+}
+
+@keyframes zoomOut {
+  from {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+    transform: scale3d(.3, .3, .3);
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+.zoomOut {
+  animation-name: zoomOut;
+}
+
+@keyframes zoomOutDown {
+  40% {
+    opacity: 1;
+    transform: scale3d(.475, .475, .475) translate3d(0, -60px, 0);
+    animation-timing-function: cubic-bezier(0.550, 0.055, 0.675, 0.190);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale3d(.1, .1, .1) translate3d(0, 2000px, 0);
+    transform-origin: center bottom;
+    animation-timing-function: cubic-bezier(0.175, 0.885, 0.320, 1);
+  }
+}
+
+.zoomOutDown {
+  animation-name: zoomOutDown;
+}
+
+@keyframes zoomOutLeft {
+  40% {
+    opacity: 1;
+    transform: scale3d(.475, .475, .475) translate3d(42px, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(.1) translate3d(-2000px, 0, 0);
+    transform-origin: left center;
+  }
+}
+
+.zoomOutLeft {
+  animation-name: zoomOutLeft;
+}
+
+@keyframes zoomOutRight {
+  40% {
+    opacity: 1;
+    transform: scale3d(.475, .475, .475) translate3d(-42px, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(.1) translate3d(2000px, 0, 0);
+    transform-origin: right center;
+  }
+}
+
+.zoomOutRight {
+  animation-name: zoomOutRight;
+}
+
+@keyframes zoomOutUp {
+  40% {
+    opacity: 1;
+    transform: scale3d(.475, .475, .475) translate3d(0, 60px, 0);
+    animation-timing-function: cubic-bezier(0.550, 0.055, 0.675, 0.190);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale3d(.1, .1, .1) translate3d(0, -2000px, 0);
+    transform-origin: center bottom;
+    animation-timing-function: cubic-bezier(0.175, 0.885, 0.320, 1);
+  }
+}
+
+.zoomOutUp {
+  animation-name: zoomOutUp;
+}
+
+@keyframes slideInDown {
+  from {
+    transform: translate3d(0, -100%, 0);
+    visibility: visible;
+  }
+
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.slideInDown {
+  animation-name: slideInDown;
+}
+
+@keyframes slideInLeft {
+  from {
+    transform: translate3d(-100%, 0, 0);
+    visibility: visible;
+  }
+
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.slideInLeft {
+  animation-name: slideInLeft;
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translate3d(100%, 0, 0);
+    visibility: visible;
+  }
+
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.slideInRight {
+  animation-name: slideInRight;
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translate3d(0, 100%, 0);
+    visibility: visible;
+  }
+
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.slideInUp {
+  animation-name: slideInUp;
+}
+
+@keyframes slideOutDown {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    visibility: hidden;
+    transform: translate3d(0, 100%, 0);
+  }
+}
+
+.slideOutDown {
+  animation-name: slideOutDown;
+}
+
+@keyframes slideOutLeft {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    visibility: hidden;
+    transform: translate3d(-100%, 0, 0);
+  }
+}
+
+.slideOutLeft {
+  animation-name: slideOutLeft;
+}
+
+@keyframes slideOutRight {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    visibility: hidden;
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+.slideOutRight {
+  animation-name: slideOutRight;
+}
+
+@keyframes slideOutUp {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    visibility: hidden;
+    transform: translate3d(0, -100%, 0);
+  }
+}
+
+.slideOutUp {
+  animation-name: slideOutUp;
+}
+
+/*/////////////////////////////////*/
+/*/////////  chat styles  /////////*/
+/*/////////////////////////////////*/
+.chat
+{
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.chat li
+{
+    margin-bottom: 40px;
+    padding-bottom: 5px;
+    /* border-bottom: 1px dotted #B3A9A9; */
+    margin-top: 10px;
+    width: 80%;
+}
+
+
+.chat li .chat-body p
+{
+    margin: 0;
+    /* color: #777777; */
+}
+
+
+.chat-care
+{
+    overflow-y: scroll;
+    height: 350px;
+}
+.chat-care .chat-img
+{
+    width: 50px;
+    height: 50px;
+}
+.chat-care .img-circle
+{
+    border-radius: 50%;
+}
+.chat-care .chat-img
+{
+    display: inline-block;
+}
+.chat-care .chat-body
+{
+    display: inline-block;
+    max-width: 80%;
+    background-color: #FFC195;
+    border-radius: 12.5px;
+    padding: 15px;
+}
+.chat-care .chat-body strong
+{
+  color: #0169DA;
+}
+
+.chat-care .admin
+{
+    text-align: right ;
+    float: right;
+}
+.chat-care .admin p
+{
+    text-align: left ;
+}
+.chat-care .agent
+{
+    text-align: left ;
+    float: left;
+}
+.chat-care .left
+{
+    float: left;
+}
+.chat-care .right
+{
+    float: right;
+}
+
+.clearfix {
+  clear: both;
+}
+
+
+
+
+::-webkit-scrollbar-track
+{
+    box-shadow: inset 0 0 6px rgba(0,0,0,0.3);
+    -webkit-box-shadow: inset 0 0 6px rgba(0,0,0,0.3);
+    background-color: #F5F5F5;
+}
+
+::-webkit-scrollbar
+{
+    width: 12px;
+    background-color: #F5F5F5;
+}
+
+::-webkit-scrollbar-thumb
+{
+    box-shadow: inset 0 0 6px rgba(0,0,0,.3);
+    -webkit-box-shadow: inset 0 0 6px rgba(0,0,0,.3);
+    background-color: #555;
+}
+
+*CUSTOM-STYLE:
+@charset "ISO-8859-1";
+
+.custom-heading {
+  text-align: center;
+}
+
+.custom-card {
+  margin: 0 auto;
+  margin-top: 3%;
+  width: 30%;
+  padding: 1%;
+}
+
+.custom-card .btn {
+  width: 100%;
+}
+
+.back {
+  position: fixed;
+  overflow: hidden;
+  top: 0;
+  left: 0;
+}
+
+.bgimg {
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 300px 100px;
+  width: 100%;
+}
+*DASHBOARD:
+
+@charset "ISO-8859-1";
+
+.heading {
+  color: White;
+}
+
+/*button start*/
+.tbtn {
+  background-color: transparent;
+  top: 50%;
+  width: 300px;
+  height: 100px;
+}
+
+.row1 {
+  margin-top: 50px;
+}
+
+.q {
+  margin-top: 18px;
+}
+
+.present {
+  font-family: sans-serif;
+  font-weight: bold;
+  color: white;
+  margin-top: 150px;
+}
+/*button end*/
+
+/*Modal css Start*/
+.modal {
+  display: none; /* Hidden by default */
+  position: fixed; /* Stay in place */
+  z-index: 1; /* Sit on top */
+  padding-top: 100px; /* Location of the box */
+  left: 0;
+  top: 0;
+  width: 100%; /* Full width */
+  height: 100%; /* Full height */
+  overflow: auto; /* Enable scroll if needed */
+  background-color: rgb(0, 0, 0); /* Fallback color */
+  background-color: rgba(0, 0, 0, 0.4); /* Black w/ opacity */
+}
+
+/* Modal Content */
+
+.modal-content {
+  background-color: #fefefe;
+  margin: auto;
+  padding: 20px;
+  border: 1px solid #888;
+  width: 80%;
+}
+/*Modal css End*/
+
+.q3 {
+  margin-top: 40px;
+}
+
+.q3btn {
+  background-color: transparent;
+}
+
+
+*ADDQUESTION:
+
+
+<jsp:include page="header.jsp" />
+
+<%
+session = request.getSession(true);
+if (session.getAttribute("username") != null) {
+%>
+<jsp:forward page="dashboard.jsp" />
+<%
+}
+%>
+<title>Insert title here</title>
+</head>
+<body>
+	<div class="card custom-card">
+
+		<form method="post" id="lol">
+
+			<div class="card-header">
+				<h2 class="custom-heading">Add Question</h2>
+			</div>
+
+			<div class="card-body">
+
+				<div class="form-group">
+					<input type="text" name="que" class="form-control"
+						placeholder="Enter Question" required />
+				</div>
+				<div class="form-group">
+					<input type="text" name="o1" class="form-control"
+						placeholder="A" required />
+				</div>
+				<div class="form-group">
+					<input type="text" name="o2" class="form-control"
+						placeholder="B" required />
+				</div>
+				<div class="form-group">
+					<input type="text" name="o3" class="form-control"
+						placeholder="C"/>
+				</div>
+				<div class="form-group">
+					<input type="text" name="o4" class="form-control"
+						placeholder="D"/>
+				</div>
+				<div class="form-group">
+					<input type="text" name="ra" class="form-control"
+						placeholder="Correct Answer" required />
+				</div>
+				<div class="form-group">
+					<input type="submit" name="submit" value="Add"
+						class="btn btn-success bb">
+				</div>
+			</div>
+		</form>
+
+	</div>
+</body>
+</html>
+
+
+*AUTH:
+
+<%
+session = request.getSession(true);
+if (session.getAttribute("username") == null) {
+	%>
+	<jsp:forward page="index.jsp" />
+	<%
+}
+%>
+
+*DASHBOARD:
+
+
+<jsp:include page="header.jsp" />
+<jsp:include page="auth.jsp" />
+<link rel="stylesheet" href="css/dashboard.css">
+<link rel="stylesheet" href="css/anime.css">
+
+<style>
+.table tr th:first-child, .table tr td:first-child {
+	width: 10%;
+}
+
+.table tr th:last-child, .table tr td:last-child {
+	width: 15%;
+}
+
+.table tr th:nth-child(3), .table tr td:nth-child(3) {
+	width: 15%;
+}
+</style>
+
+<title>DashBoard</title>
+</head>
+<body>
+	<div class="back">
+		<img src="img/4.jpg" class="bgimg" type="jpg/jpeg">
+	</div>
+	
+	<%@page import="java.sql.*"%>
+		<%@page import="javax.servlet.*, jakarta.servlet.http.*, models.User"%>
+
+		<%
+		String username;
+		Connection con;
+		Statement stmt, stmt2;
+		ResultSet rs, rs2;
+		User user = null;
+
+		HttpSession sess;
+		sess = request.getSession();
+		username = (String) sess.getAttribute("username");
+
+		Class.forName("com.mysql.cj.jdbc.Driver");
+		con = DriverManager.getConnection("jdbc:mysql://localhost:3306/online-quiz", "root", "root123");
+		stmt = con.createStatement();
+		stmt2 = con.createStatement();
+		
+		rs2 = stmt2.executeQuery("SELECT * FROM users WHERE username='"+username+"'");
+		if(rs2.next()) user = new User(username, rs2.getString("name"), rs2.getString("email"));
+		if(user == null) response.sendRedirect("index.jsp");
+		
+		rs = stmt.executeQuery(
+				"SELECT *, (SELECT AVG(rating) FROM feedback WHERE quiz.quizid=quizid) as total FROM quiz WHERE username='" + username + "' ORDER BY timestamp DESC;");
+		int i = 1;
+		%>
+
+	<div class="container-fluid text-center">
+		<div class="row1">
+			<div class="col-md-12">
+				<p class="text-right heading">
+					<a class="btn btn-danger" href="Logout"><i
+						class="fa fa-sign-out" aria-hidden="true"></i> Logout</a>
+				</p>
+				<h1 class="heading">Welcome, <%=user.name %>!</h1>
+
+			</div>
+		</div>
+		<div class="row" style="margin-top: 15vh">
+
+			<div class="col animated slideInLeft">
+				<a class="btn btn-primary tbtn" href="#createQuizModal"
+					data-toggle="modal"><h1 class="q">
+						<i class="fa fa-plus" aria-hidden="true"></i> Create Quiz
+					</h1></a>
+			</div>
+			<div class="col animated slideInRight">
+				<a class="btn btn-danger tbtn" href="#participateModal"
+					data-toggle="modal">
+					<h1 class="q">
+						<i class="fa fa-graduation-cap" aria-hidden="true"></i>
+						Participate
+					</h1>
+				</a>
+			</div>
+		</div>
+		<div class="row mt-5">
+			<div class="col-md-12">
+		<%
+		if(rs.isBeforeFirst()) {
+		%>
+				<table class="table table-hover table-light table-borderless"
+					style="width: 60%; margin: 0 auto;'">
+					<thead class="thead-dark">
+						<tr>
+							<th scope="col">No.</th>
+							<th scope="col">Quiz Name</th>
+							<th scope="col">Rating</th>
+							<th scope="col">View</th>
+							<th scope="col">Delete</th>
+						</tr>
+					</thead>
+					<tbody>
+						<%
+						while (rs.next()) {
+							String quizid = rs.getString("quizid");
+							String quizname = rs.getString("quizname");
+							double total = rs.getDouble("total");
+						%>
+						<tr>
+							<th scope="row"><%=i++%></th>
+							<td><%=quizname%></td>
+							<td>
+                                <span class="fa fa-star<%=total>0?(total<1?"-half-o":""):"-o"%>"></span>
+                                <span class="fa fa-star<%=total>1?(total<2?"-half-o":""):"-o"%>"></span>
+                                <span class="fa fa-star<%=total>2?(total<3?"-half-o":""):"-o"%>"></span>
+                                <span class="fa fa-star<%=total>3?(total<4?"-half-o":""):"-o"%>"></span>
+                                <span class="fa fa-star<%=total>4?(total<5?"-half-o":""):"-o"%>"></span>
+                            </td>
+							<td><a class="btn btn-info"
+								href="quiz.jsp?id=<%=quizid%>&name=<%=quizname%>"><i
+									class="fa fa-eye" aria-hidden="true"></i> View</a></td>
+							<td><a class="btn btn-danger"
+								href="DeleteQuiz?id=<%=quizid%>"><i class="fa fa-trash"
+									aria-hidden="true"></i> Delete</a></td>
+						</tr>
+						<%
+						}
+						%>
+					</tbody>
+				</table>
+			</div>
+		</div>
+	</div>
+		<%
+		} else {
+			%>
+			<div class="jumbotron"><h2>You haven't created any quiz yet!</h2></div>
+			<%
+		}
+		%>
+
+	<script src="https://code.jquery.com/jquery-3.2.1.slim.min.js"
+		integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN"
+		crossorigin="anonymous"></script>
+	<script
+		src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js"
+		integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q"
+		crossorigin="anonymous"></script>
+	<script
+		src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"
+		integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl"
+		crossorigin="anonymous"></script>
+</body>
+
+<!-- Create Modal HTML -->
+<div id="createQuizModal" class="modal fade" style="z-index: 9999;"
+	role="dialog">
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="card">
+				<form method="post" action="CreateQuiz">
+					<div class="card-header">
+						<h2 class="custom-heading">Quiz</h2>
+					</div>
+
+					<div class="card-body">
+						<div class="form-group">
+							<input type="text" name="quizname" class="form-control"
+								placeholder="Quiz Name" required />
+						</div>
+
+						<div class="form-group">
+							<input type="submit" name="submit" value="Create"
+								class="btn btn-success bb">
+						</div>
+					</div>
+				</form>
+
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- Participate Modal HTML -->
+<div id="participateModal" class="modal fade" style="z-index: 9999;"
+	role="dialog">
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="card">
+				<form method="get" action="participate.jsp">
+					<div class="card-header">
+						<h2 class="custom-heading">Participate</h2>
+					</div>
+
+					<div class="card-body">
+						<div class="form-group">
+							<input type="text" name="id" class="form-control"
+								placeholder="Quiz ID" required />
+						</div>
+
+						<div class="form-group">
+							<input type="submit" value="Participate"
+								class="btn btn-success bb">
+						</div>
+					</div>
+				</form>
+
+			</div>
+		</div>
+	</div>
+</div>
+
+</html>
+
+*CHAT:
+
+
+<link rel="stylesheet" href="./css/chat.css">
+<%
+String uname = (String) session.getAttribute("username");
+%>
+<script>
+var wsChat = new WebSocket(wsUrl + window.location.host
+		+ "/OnlineQuiz/Chat");
+
+function sendChat(){
+	var msgContent = document.getElementById("msgContent").value;
+	console.log(msgContent);
+	wsChat.send( '<%=uname%>' +","+msgContent);
+	document.getElementById("msgContent").value = "";
+}
+wsChat.onmessage = function(event) {
+	$('.card-body').scrollTop(1000000);
+	console.log("MSG RECEIVED : "+event.data);
+	var dd = event.data.split(",");
+	if(dd[0] === '<%=uname%>'){
+		document.getElementById("chat-screen").innerHTML += 
+		`<li class="admin clearfix">
+        <span class="chat-img right clearfix  mx-2">
+            <img src="http://placehold.it/50/FA6F57/fff&text=ME" alt="Admin" class="img-circle" />
+        </span>
+        <div class="chat-body clearfix">
+            <div class="header clearfix">
+                
+                <strong class="right primary-font">` + dd[0] + `</strong>
+            </div>
+            <p>
+            ` + dd[1] + `
+            </p>
+        </div>
+    </li>`;
+    
+		
+	}else{
+		document.getElementById("chat-screen").innerHTML += 
+		` <li class="agent clearfix">
+        <span class="chat-img left clearfix mx-2">
+            <img src="http://placehold.it/50/55C1E7/fff&text=`+dd[0].substr(0,1) + `" alt="Agent" class="img-circle" />
+        </span>
+        <div class="chat-body clearfix">
+            <div class="header clearfix">
+                <strong class="primary-font">` + dd[0] + `</strong> <small class="right text-muted">
+                    
+            </div>
+            <p>
+                ` + dd[1] + ` 
+            </p>
+        </div>
+    </li> `;
+	}
+	
+}
+</script>
+<div class="col-md-3 mx-auto" style="float: right; margin-top: 10px;">
+	<div class="card">
+		<div class="card-header text-center">
+			<span>Chat Box</span>
+		</div>
+		<div class="card-body chat-care">
+			<ul class="chat" id="chat-screen">
+
+
+
+			</ul>
+		</div>
+		<div class="card-footer">
+			<div class="input-group">
+				<input id="msgContent" type="text" class="form-control input-sm"
+					placeholder="Type your message here..." /> <span
+					class="input-group-btn">
+					<button class="btn btn-primary" id="btn-chat" onClick="sendChat()">
+						Send</button>
+				</span>
+			</div>
+		</div>
+	</div>
+</div>
+
+
+*FOOTER:
+
+<script src="https://code.jquery.com/jquery-3.2.1.slim.min.js"
+	integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN"
+	crossorigin="anonymous"></script>
+<script
+	src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js"
+	integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q"
+	crossorigin="anonymous"></script>
+<script
+	src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"
+	integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl"
+	crossorigin="anonymous"></script>
+</body>
+</html>
+
+*HEADER:
+
+
+<%@ page language="java" contentType="text/html; charset=ISO-8859-1"
+	pageEncoding="ISO-8859-1"%>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="ISO-8859-1">
+<link rel="stylesheet"
+	href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+	integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
+	crossorigin="anonymous">
+<link rel="stylesheet"
+	href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
+<link rel="stylesheet" href="css/custom-style.css" type="text/css">
+<%-- <%
+session = request.getSession(true);
+out.println(session.getAttribute("username"));
+if (session.getAttribute("username") == null) {
+	response.sendRedirect("index.jsp");
+} else {
+	response.sendRedirect("/Dashboard");
+}
+%> --%>
+
+
+*INDEX:
+<jsp:include page="header.jsp" />
+
+<%
+session = request.getSession(true);
+if (session.getAttribute("username") != null) {
+%>
+<jsp:forward page="dashboard.jsp" />
+<%
+}
+%>
+
+<title>Online Quiz - Login</title>
+</head>
+<body>
+	<div class="back">
+		<img src="img/1.jpg" class="bgimg" type="jpg/jpeg">
+	</div>
+	<div class="card custom-card">
+		<div class="card-header">
+			<h2 class="custom-heading">Login</h2>
+		</div>
+		<div class="card-body">
+			<form action="Login" method="post">
+				<div class="form-group">
+					<input type="text" name="username" class="form-control"
+						placeholder="Username" />
+				</div>
+
+				<div class="form-group">
+					<input type="password" name="password" class="form-control"
+						placeholder="Password" />
+				</div>
+
+				<!-- <div class="form-check">
+					<input class="form-check-input" type="checkbox" value=""
+						id="defaultCheck1"> <label class="form-check-label"
+						for="defaultCheck1"> Remember Me </label>
+				</div> -->
+
+				<button type="submit" class="btn btn-success"><i class="fa fa-sign-out" aria-hidden="true"></i> Login</button>
+			</form>
+			<br /> <a href="register.jsp"><button class="btn btn-primary"><i class="fa fa-user-circle" aria-hidden="true"></i> Register</button></a>
+		</div>
+	</div>
+	<jsp:include page="footer.jsp" />
+
+
+*LEADERBOARD:
+
+
+<jsp:include page="header.jsp" />
+<title>Winners</title>
+<style>
+.demo {
+	background: #dad9d4;
+}
+
+.progress {
+	height: 40px;
+	background: #fff;
+	border-radius: 100px;
+	box-shadow: none;
+	margin-top: 40px;
+	position: relative;
+}
+
+.progress .progress-title {
+	width: 20%;
+	height: 100%;
+	background: #fff;
+	border-radius: 100px 0 0 100px;
+	float: left;
+	margin: 0;
+	font-size: 15px;
+	color: #000;
+	line-height: 40px;
+	letter-spacing: 1px;
+	text-align: center;
+	text-transform: uppercase;
+	position: relative;
+}
+
+.progress .progress-title:after {
+	content: "";
+	border-left: 10px solid #fff;
+	border-top: 10px solid transparent;
+	border-bottom: 10px solid transparent;
+	position: absolute;
+	top: 10px;
+	right: -10px;
+	z-index: 1;
+}
+
+.progress .progress-bar {
+	width: 80%;
+	background: #fff;
+	box-shadow: none;
+	position: relative;
+}
+
+.progress .progress-value {
+	height: 100%;
+	border-radius: 0 100px 100px 0;
+	font-size: 15px;
+	font-weight: bold;
+	line-height: 40px;
+	color: #fff;
+	animation: animate-positive 2s;
+}
+
+.progress.red .progress-value{ background: #e53935; }
+.progress.pink .progress-value{ background: #D81B60; }
+.progress.purple .progress-value{ background: #8E24AA; }
+.progress.deeppurple .progress-value{ background: #5E35B1; }
+.progress.indigo .progress-value{ background: #3949AB; }
+.progress.blue .progress-value{ background: #1E88E5; }
+.progress.lightblue .progress-value{ background: #039BE5; }
+.progress.cyan .progress-value{ background: #00ACC1; }
+.progress.teal .progress-value{ background: #00897B; }
+.progress.green .progress-value{ background: #43A047; }
+.progress.lightgreen .progress-value{ background: #7CB342; }
+.progress.lime .progress-value{ background: #C0CA33; }
+.progress.yellow .progress-value{ background: #FDD835; }
+.progress.amber .progress-value{ background: #FFB300; }
+.progress.orange .progress-value{ background: #FB8C00; }
+.progress.deeporange .progress-value{ background: #F4511E; }
+.progress.brown .progress-value{ background: #6D4C41; }
+.progress.grey .progress-value{ background: #757575; }
+.progress.bluegrey .progress-value{ background: #546E7A; }
+
+@keyframes animate-positive { 
+	0%{ width: 0%; }
+}
+@media only screen and (max-width: 480px) {
+	.progress .progress-title {
+		font-size: 12px;
+		letter-spacing: 0;
+	}
+}
+</style>
+</head>
+<body>
+	<div class="back">
+		<img src="img/5.jpg" class="bgimg" type="jpg/jpeg">
+	</div>
+
+	<div class="container-fluid text-center mt-5">
+		<div class="row1">
+			<div class="col-md-12">
+				<p class="text-right heading">
+					<a class="btn btn-primary float-left" href="dashboard.jsp"> <i class="fa fa-arrow-left" aria-hidden="true"></i> 
+						Dashboard</a> <a class="btn btn-danger" href="Logout"><i class="fa fa-sign-out" aria-hidden="true"></i> Logout</a>
+				</p>
+				<h1 style="color: white">Leaderboard</h1>
+			</div>
+		</div>
+		<div class="row mt-4">
+			<div class="col-md-12">
+				<%@page import="java.sql.*, java.lang.Math"%>
+				<%@page import="javax.servlet.*, jakarta.servlet.http.*"%>
+
+				<%
+				String[] color = { "red", "pink", "purple", "deeppurple", "indigo", "blue", "lightblue", "cyan", "teal", "green",
+						"lightgreen", "lime", "yellow","amber","orange","deeporange", "brown", "grey", "bluegrey" };
+				Connection con;
+				Statement stmt;
+				ResultSet rs;
+
+				String quizid = request.getParameter("id");
+				Class.forName("com.mysql.cj.jdbc.Driver");
+				con = DriverManager.getConnection("jdbc:mysql://localhost:3306/online-quiz", "root", "root123");
+				stmt = con.createStatement();
+				rs = stmt.executeQuery("Select Count(questionid) from questions where quizid='" + quizid + "'");
+				rs.next();
+				int totalQuestion = rs.getInt(1);
+				String sql = "SELECT s.username, SUM(s.isCorrect) AS score FROM quiz qu, scoreboard s WHERE qu.quizid='" + quizid
+						+ "' and s.questionid IN(SELECT questionid FROM questions WHERE quizid='" + quizid
+						+ "') GROUP BY username ORDER BY score DESC;";
+				rs = stmt.executeQuery(sql);
+				int i = 1;
+				while (rs.next()) {
+					String username = rs.getString("username");
+					int score = rs.getInt("score");
+					float percentage = (float) ((float) score / totalQuestion) * 100;
+				%>
+
+				<div class="progress <%=color[(int) (Math.random() * 19)]%>">
+					<h3 class="progress-title"><%=username%></h3>
+					<div class="progress-bar">
+						<div class="progress-value" style="width: <%=percentage%>%;"><%=score%></div>
+					</div>
+				</div>
+				<%
+				}
+				%>
+			</div>
+		</div>
+		
+		<div class="row mt-5">
+		  <div class="col col-lg-4"></div>
+		    <div class="col col-lg-4 text-center">	
+				<a href="rate.jsp?id=<%= quizid %>" class="btn btn-warning btn-lg" style="font-weight:bold;"> Rate this Presentation </a>	
+			</div>
+			<div class="col col-lg-4"></div>
+		</div>
+	</div>
+	<jsp:include page="footer.jsp" />
+
+*NAVBAR:
+
+<nav class="navbar navbar-expand-lg navbar-light bg-light">
+		<button class="navbar-toggler" type="button" data-toggle="collapse"
+			data-target="#navbarTogglerDemo03"
+			aria-controls="navbarTogglerDemo03" aria-expanded="false"
+			aria-label="Toggle navigation">
+			<span class="navbar-toggler-icon"></span>
+		</button>
+		<a class="navbar-brand" href="dashboard.jsp">OnlineQuiz</a>
+
+		<div class="collapse navbar-collapse" id="navbarTogglerDemo03">
+			<ul class="navbar-nav mr-auto mt-2 mt-lg-0">
+				<li class="nav-item active"><a class="nav-link"
+					href="dashboard.jsp"><i class="fa fa-home" aria-hidden="true"></i> Dashboard</a></li>
+			</ul>
+			<a href="Logout" class="btn btn-danger"><i class="fa fa-sign-out" aria-hidden="true"></i> Logout</a>
+		</div>
+	</nav>
+
+
+*PARTICIPATE:
+
+<jsp:include page="header.jsp" />
+<jsp:include page="auth.jsp" />
+<title>Participate</title>
+<link rel="stylesheet"
+	href="https://fonts.googleapis.com/css?family=Roboto|Varela+Round">
+<link rel="stylesheet"
+	href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+	integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
+	crossorigin="anonymous">
+<link rel="stylesheet"
+	href="https://fonts.googleapis.com/icon?family=Material+Icons">
+
+<script type="text/javascript"
+	src="https://www.gstatic.com/charts/loader.js"></script>
+<style>
+@import
+	url('https://fonts.googleapis.com/css2?family=Montserrat&display=swap')
+	;
+
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box
+}
+
+body {
+	background-color: #333
+}
+
+.container-question {
+	background-color: #555;
+	color: #ddd;
+	border-radius: 10px;
+	padding: 10px;
+	font-family: 'Montserrat', sans-serif;
+	max-width: 700px
+}
+
+.container>p {
+	font-size: 32px
+}
+
+.question {
+	width: 75%
+}
+
+.options {
+	position: relative;
+	padding-left: 40px
+}
+
+#options label {
+	display: block;
+	margin-bottom: 15px;
+	font-size: 14px;
+	cursor: pointer
+}
+
+.options input {
+	opacity: 0
+}
+
+.checkmark {
+	position: absolute;
+	top: -1px;
+	left: 0;
+	height: 25px;
+	width: 25px;
+	background-color: #555;
+	border: 1px solid #ddd;
+	border-radius: 50%
+}
+
+.options input:checked ~.checkmark:after {
+	display: block
+}
+
+.options .checkmark:after {
+	content: "";
+	width: 10px;
+	height: 10px;
+	display: block;
+	background: white;
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	border-radius: 50%;
+	transform: translate(-50%, -50%) scale(0);
+	transition: 300ms ease-in-out 0s
+}
+
+.options input[type="radio"]:checked ~.checkmark {
+	background: #21bf73;
+	transition: 300ms ease-in-out 0s
+}
+
+.options input[type="radio"]:checked ~.checkmark:after {
+	transform: translate(-50%, -50%) scale(1)
+}
+
+.btn-primary {
+	background-color: #555;
+	color: #ddd;
+	border: 1px solid #ddd
+}
+
+.btn-primary:hover {
+	background-color: #21bf73;
+	border: 1px solid #21bf73
+}
+
+.btn-success {
+	padding: 5px 25px;
+	background-color: #21bf73
+}
+
+
+@media ( max-width :576px) {
+	.question {
+		width: 100%;
+		word-spacing: 2px
+	}
+}
+</style>
+<script type="text/javascript">
+	var quizid =
+<%=request.getParameter("id")%>
+	;
+	console.log(quizid);
+	var wsUrl;
+	if (window.location.protocol == 'http:') {
+		wsUrl = 'ws://';
+	} else {
+		wsUrl = 'wss://';
+	}
+	var ws = new WebSocket(wsUrl + window.location.host
+			+ "/OnlineQuiz/SendQuestion");
+	var ws5 = new WebSocket(wsUrl + window.location.host
+			+ "/OnlineQuiz/SubmitAnswer");
+	var currentQuestion;
+	
+	var ws2 = new WebSocket(wsUrl + window.location.host
+			+ "/OnlineQuiz/GetDetails");
+	
+	var ws33 = new WebSocket(wsUrl + window.location.host
+			+ "/OnlineQuiz/GetScores");
+
+	ws33.onmessage = function(event) {
+		var result = event.data.split(',');
+		console.log(result);
+		document.getElementById("teebodee").innerHTML = "";
+		for(let i = 0; i < result.length; i++) {
+			let j = i + 1;
+			var dat = result[i].split(":");
+			document.getElementById("teebodee").innerHTML += '<tr><th scope="row">' + j + '</th><td>'+dat[0]+'</td><td>'+dat[1]+'/'+dat[2]+'</td></tr>';				
+		}
+	}
+	
+	ws33.onerror = function(event) {
+		console.log("Error ws30", event)
+	}
+
+	ws2.onmessage = function(event) {
+		var result = event.data.split(',');
+		//if(result[0].indexOf(":") == -1) {
+			google.charts.load('current', {'packages':['corechart']});
+			google.charts.setOnLoadCallback(drawChart);
+			function drawChart() {
+				var data = google.visualization.arrayToDataTable([
+					['Result', 'Total'],
+					['Correct Answers', parseInt(result[0])],
+					['Wrong Answers', parseInt(result[1])]
+					]);
+				
+				var options = {
+					title: 'Score in percentage'
+				};
+			
+				var chart = new google.visualization.PieChart(document.getElementById('piechart'));
+				chart.draw(data, options);
+			}
+	
+	};
+	
+	ws2.onerror = function(event) {
+		console.log("Error ", event)
+	}
+
+	ws.onmessage = function(event) {
+		if (event.data.indexOf("nextquestion") > -1) {
+			var strs = event.data.split(",");
+			if (strs[1] == quizid) {
+				$("#scoreboard").modal("hide");
+				document.getElementById("smbtn").disabled = false;
+				document.getElementById("loading").style.display = "none";
+				var btns = document.getElementsByName("radio");
+				for (let i = 0; i < btns.length; i++) {
+					if (btns[i].checked) {
+						btns[i].checked = false;
+					}
+				}
+			}
+			return;
+		}
+
+		if (event.data.indexOf("scoreboard") > -1) {
+			var strs = event.data.split(",");
+			if (strs[1] == quizid) {
+				var crtans;
+				switch(currentQuestion['ca']) {
+					case '1': crtans = 'A'; break;
+					case '2': crtans = 'B'; break;
+					case '3': crtans = 'C'; break;
+					case '4': crtans = 'D'; break;
+					default: crtans = ''; break;
+				}
+				document.getElementById("crtans").innerHTML = "<b>Correct Answer: " + crtans + "</b>";
+				$("#scoreboard").modal("show");
+			}
+			return;
+		}
+
+		const question = JSON.parse(event.data);
+		currentQuestion = question;
+
+		if (question['quizid'] == quizid) {
+			document.getElementById("startpt").style.display = 'none';
+			document.getElementById("qdata").style.display = 'block';
+			document.getElementById("disp_qname").innerHTML = question['qname'];
+			document.getElementById("disp_a").innerHTML = question['a'];
+			document.getElementById("disp_b").innerHTML = question['b'];
+			document.getElementById("disp_c").innerHTML = question['c'];
+			document.getElementById("disp_d").innerHTML = question['d'];
+			if(question['isLast']) {
+				document.getElementById("nextqbtn").innerHTML = '<a href="leaderboard.jsp?id='+quizid+'" class="btn btn-info btn-lg" role="alert"><i class="fa fa-trophy" aria-hidden="true"></i> Display Results</a>';
+			}
+		}
+	};
+
+	ws.onerror = function(event) {
+		console.log("Error ", event)
+	}
+	
+	ws5.onerror = function(event) {
+		console.log("Error ", event)
+	}
+
+	function sendMsg(msg) {
+		if (msg) {
+			ws.send(msg);
+		}
+	}
+
+	function submitAnswer() {
+		document.getElementById("smbtn").disabled = true;
+		document.getElementById("loading").style.display = "block";
+		var selectedValue = 0;
+		var btns = document.getElementsByName("radio");
+		for (let i = 0; i < btns.length; i++) {
+			if (btns[i].checked) {
+				selectedValue = i + 1;
+			}
+		}
+		<%String uname = (String) session.getAttribute("username");%>
+		var isCorrect = selectedValue == currentQuestion['ca'] ? 1: 0;
+		var msg = currentQuestion['qid'] + "," + "<%=uname%>" + "," + selectedValue + "," + isCorrect;
+		console.log("MSG: " + msg);
+		ws5.send(msg);
+	}
+	
+
+	
+</script>
+</head>
+<body onload="sendMsg('')">
+	<jsp:include page="navbar.jsp" />
+	<jsp:include page="scoreboard.jsp" />
+	<script>
+		document.getElementById("nextqbtn").innerHTML = '<div style="text-align: center;" class="alert alert-info" role="alert"><i class="fa fa-hourglass-end" aria-hidden="true"></i> Waiting for presenter...</div>';
+	</script>
+
+	<%
+	String quizid = request.getParameter("id");
+	if (db.Database.quizExists(quizid)) {
+	%>
+
+	<div id="startpt" class="jumbotron" style="text-align: center;">
+		<h3><i class="fa fa-hourglass-end" aria-hidden="true"></i> Please wait for the question!</h3>
+	</div>
+	<div class="row ">
+	<div id="qdata" class="col-md-8" style="display: none;">
+		<div class="container container-question mt-sm-5 my-1">
+			<div class="question ml-sm-5 pl-sm-5 pt-2">
+				<div class="py-2 h5">
+					<b id="disp_qname"></b>
+				</div>
+				<div class="" id="options">
+					<label class="options"><span id="disp_a"></span><input
+						type="radio" name="radio"> <span class="checkmark"></span>
+					</label> <label class="options"><span id="disp_b"></span><input
+						type="radio" name="radio"> <span class="checkmark"></span>
+					</label> <label class="options"><span id="disp_c"></span><input
+						type="radio" name="radio"> <span class="checkmark"></span>
+					</label> <label class="options"><span id="disp_d"></span><input
+						type="radio" name="radio"> <span class="checkmark"></span>
+					</label>
+					<button id="smbtn" class="btn btn-success btn-lg"
+						onclick="submitAnswer()" style="float:right"><i class="fa fa-thumbs-up" aria-hidden="true"></i> Submit</button>
+					<br /> <br />
+					<div id="loading" style="display: none; text-align: center;"
+						class="alert alert-info" role="alert"><i class="fa fa-hourglass-end" aria-hidden="true"></i> Waiting for results...</div>
+				</div>
+			</div>
+		</div>
+		</div>
+		<jsp:include page="chat.jsp" />
+	</div>
+	<%
+	} else {
+	%>
+	<div style="text-align: center;" class="jumbotron">
+		No such quiz available.<br> <a href="dashboard.jsp"
+			class="btn btn-info">Dashboard</a>
+	</div>
+	<%
+	}
+	%>
+</body>
+
+
+
+<script src="https://code.jquery.com/jquery-3.2.1.slim.min.js"
+	integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN"
+	crossorigin="anonymous"></script>
+<script
+	src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js"
+	integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q"
+	crossorigin="anonymous"></script>
+<script
+	src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"
+	integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl"
+	crossorigin="anonymous"></script>
+</html>
+
+
+
+*PRESENTATION:
+
+<%@ page language="java" contentType="text/html; charset=ISO-8859-1"
+	pageEncoding="ISO-8859-1"%>
+<!DOCTYPE html>
+<html>
+<link rel="stylesheet"
+	href="https://fonts.googleapis.com/css?family=Roboto|Varela+Round">
+<link rel="stylesheet"
+	href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+	integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
+	crossorigin="anonymous">
+<link rel="stylesheet"
+	href="https://fonts.googleapis.com/icon?family=Material+Icons">
+<link rel="stylesheet"
+	href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
+<script src="//code.jquery.com/jquery-1.11.0.min.js"></script>
+<script type="text/javascript"
+	src="https://www.gstatic.com/charts/loader.js"></script>
+<style>
+@import
+	url('https://fonts.googleapis.com/css2?family=Montserrat&display=swap')
+	;
+
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box
+}
+
+body {
+	background-color: #333
+}
+
+.question-container {
+	background-color: #555;
+	color: #ddd;
+	border-radius: 10px;
+	padding: 20px;
+	font-family: 'Montserrat', sans-serif;
+	max-width: 700px;
+	max-height: 300px;
+}
+
+.question-container>p {
+	font-size: 32px
+}
+
+.question {
+	width: 75%
+}
+
+.options {
+	position: relative;
+	padding-left: 40px
+}
+
+#options label {
+	display: block;
+	margin-bottom: 15px;
+	font-size: 14px;
+	cursor: pointer
+}
+
+.options input {
+	opacity: 0
+}
+
+.checkmark {
+	position: absolute;
+	top: -1px;
+	left: 0;
+	height: 25px;
+	width: 25px;
+	background-color: #555;
+	border: 1px solid #ddd;
+	border-radius: 50%
+}
+
+.options input:checked ~.checkmark:after {
+	display: block
+}
+
+.options .checkmark:after {
+	content: "";
+	width: 10px;
+	height: 10px;
+	display: block;
+	background: white;
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	border-radius: 50%;
+	transform: translate(-50%, -50%) scale(0);
+	transition: 300ms ease-in-out 0s
+}
+
+.options input[type="radio"]:checked ~.checkmark {
+	background: #21bf73;
+	transition: 300ms ease-in-out 0s
+}
+
+.options input[type="radio"]:checked ~.checkmark:after {
+	transform: translate(-50%, -50%) scale(1)
+}
+
+.btn-primary {
+	background-color: #555;
+	color: #ddd;
+	border: 1px solid #ddd
+}
+
+.btn-primary:hover {
+	background-color: #21bf73;
+	border: 1px solid #21bf73
+}
+
+.btn-success {
+	padding: 5px 25px;
+	background-color: #21bf73
+}
+
+@media ( max-width :576px) {
+	.question {
+		width: 100%;
+		word-spacing: 2px
+	}
+}
+</style>
+<%@page import="db.Database"%>
+<script>
+var quiz_id = <%=request.getParameter("id")%>
+	var wsUrl;
+	if (window.location.protocol == 'http:') {
+		wsUrl = 'ws://';
+	} else {
+		wsUrl = 'wss://';
+	}
+	
+	var ws = new WebSocket(wsUrl + window.location.host
+			+ "/OnlineQuiz/GetAnswer");
+	
+	var ws9 = new WebSocket(wsUrl + window.location.host
+			+ "/OnlineQuiz/GetDetails");
+	
+	var ws20 = new WebSocket(wsUrl + window.location.host
+			+ "/OnlineQuiz/GetDetails");
+	
+	var ws30 = new WebSocket(wsUrl + window.location.host
+			+ "/OnlineQuiz/GetScores");
+
+	ws30.onmessage = function(event) {
+		var result = event.data.split(',');
+		console.log(result);
+		document.getElementById("teebodee").innerHTML = "";
+		for(let i = 0; i < result.length; i++) {
+			let j = i + 1;
+			var dat = result[i].split(":");
+			document.getElementById("teebodee").innerHTML += '<tr><th scope="row">' + j + '</th><td>'+dat[0]+'</td><td>'+dat[1]+'/'+dat[2]+'</td></tr>';				
+		}
+	}
+	
+	ws20.onmessage = function(event) {
+		var result = event.data.split(',');
+		
+			google.charts.load('current', {'packages':['corechart']});
+			google.charts.setOnLoadCallback(drawChart);
+			function drawChart() {
+				var data = google.visualization.arrayToDataTable([
+					['Result', 'Total'],
+					['Correct Answers', parseInt(result[0])],
+					['Wrong Answers', parseInt(result[1])]
+					]);
+				
+				var options = {
+					title: 'Score in percentage'
+				};
+			
+				var chart = new google.visualization.PieChart(document.getElementById('piechart'));
+				chart.draw(data, options);
+			}
+		
+	};
+	
+	ws20.onerror = function(event) {
+		console.log("Error ", event)
+	}
+	
+	ws30.onerror = function(event) {
+		console.log("Error ws30", event)
+	}
+
+	ws.onmessage = function(event) {
+		var mySpan = document.getElementById("crtans");
+		mySpan.innerHTML = "<b>Correct Answer: " + event.data + "</b>";
+	};
+
+	ws.onerror = function(event) {
+		console.log("Error ", event)
+	}
+	
+	var ws3 = new WebSocket(wsUrl + window.location.host + "/OnlineQuiz/SendQuestion");
+	
+	ws3.onmessage = function(event) {
+		
+	};
+
+	ws3.onerror = function(event) {
+		console.log("Error ", event)
+	}
+
+
+	var qArray = [];
+	
+	function sendMsg(val) {
+		var qid = document.getElementById("id_" + val).value;
+		var msg = qid;
+		if (msg) {
+			ws.send(msg);
+			ws20.send(msg);
+		}
+		document.getElementById("crtans").value = "";
+	}
+	
+
+	function test(val, isLast = false) {
+		
+		ws30.send('get'+quiz_id);
+		sendMsg(val);
+		sendMessage("scoreboard,"+"<%=request.getParameter("id")%>");
+		
+		if(isLast) {
+			var nextbtn = document.getElementById("nextqbtn");
+			nextbtn.innerHTML = '<a href="leaderboard.jsp?id='+quiz_id+'" id="disp_btn" class="btn btn-lg btn-success bb"><i class="fa fa-trophy" aria-hidden="true"></i> Display Results</a>';
+		}
+	}
+	
+
+</script>
+</head>
+<body>
+
+	<jsp:include page="navbar.jsp" />
+	<jsp:include page="scoreboard.jsp" />
+	<%@page import="models.questions.*"%>
+	<%@page import="java.util.*"%>
+	<%@page import="java.sql.*, java.util.*"%>
+	<%@page import="javax.servlet.*, jakarta.servlet.http.*"%>
+	<div
+		style="text-align: center; padding: 20px; width: 800px; margin: 0 auto; color: white;">
+		<h3>
+			Go to OnlineQuiz/participate.jsp and use the code
+			<%=request.getParameter("id")%></h3>
+		<div id="startpt" class="jumbotron">
+			<button class="btn btn-success btn-lg" onclick="showQuestion(0)"><i class="fa fa-play" aria-hidden="true"></i> Start
+				Presentation</button>
+		</div>
+	</div>
+	<div class="row">
+	<%
+	String quizid;
+	quizid = request.getParameter("id");
+
+	String username;
+	Connection con;
+	Statement stmt;
+	ResultSet rs;
+	String qid = "";
+
+	HttpSession sess;
+	sess = request.getSession();
+	username = (String) sess.getAttribute("username");
+
+	Class.forName("com.mysql.cj.jdbc.Driver");
+	
+	con = DriverManager.getConnection("jdbc:mysql://localhost:3306/online-quiz", "root", "root123");
+	stmt = con.createStatement();
+	rs = stmt.executeQuery("SELECT * FROM questions WHERE quizid='" + quizid + "' ORDER BY timestamp, qno");
+	/*List<Question> questions = new ArrayList<>();*/
+
+	int i = 0;
+	while (rs.next()) {
+		qid = rs.getString("questionid");
+		String question = rs.getString("question");
+		String a = rs.getString("option1");
+		String b = rs.getString("option2");
+		String c = rs.getString("option3");
+		String d = rs.getString("option4");
+		int ca = Integer.parseInt(rs.getString("correctanswer"));
+		String qType = rs.getString("type");
+
+		
+	%>
+	<script>
+		qArray.push({
+			"qid": "<%=qid%>",
+			"qname": "<%=question%>",
+			"a": "<%=a%>",
+			"b": "<%=b%>",
+			"c": "<%=c%>",
+			"d": "<%=d%>",
+			"ca": "<%=ca%>",
+			"quizid": "<%=quizid%>"
+		});
+	</script>
+	
+	<div class="container question-container mt-sm-5 my-1" name="questions"
+		id="question_<%=i%>" style="display: none;">
+		<input type="hidden" id="id_<%=i%>" style="display: none;"
+			value="<%=qid%>">
+		<div class="question ml-sm-5 pl-sm-5 pt-2">
+			<div class="py-2 h5">
+				<b id="display_qname"><%=question%></b>
+			</div>
+			<div id="options">
+				<label class="options" id="display_a">A) <%=a%>
+				</label> <label class="options" id="display_b">B) <%=b%>
+				</label> <label class="options" id="display_c">C) <%=c%>
+				</label> <label class="options" id="display_d">D) <%=d%>
+				</label>
+			</div>
+		</div>
+		<div class="d-flex align-items-center pt-3" id="nextbtn_<%=i%>"></div>
+		</div>
+	<%
+	i++;
+	}
+	%>
+	<div
+		style="display: none; padding-top: 10px; width: 100px; margin: 0 auto;"
+		id="finishbtn">
+		<a data-toggle='modal' data-target='#scoreboard'
+			onclick="test(<%=i - 1%>, true)" class="btn btn-success" style="color:#fff;"><i class="fa fa-fast-forward" aria-hidden="true"></i> Finish</a>
+	</div>
+	<!-- </div> -->
+	<jsp:include page="chat.jsp" />
+	 </div>
+	<script>
+	var last = qArray[qArray.length-1];
+	last = {...last, "isLast": "true"};
+	qArray[qArray.length-1] = last;
+	
+	function showQuestion(id) {
+		sendMessage("nextquestion,"+"<%=quizid%>");
+		document.getElementById("startpt").style.display = "none";
+		document.getElementById('closeScoreboard').click();
+		var questions = document.getElementsByName("questions");
+
+		for (let i = 0; i < questions.length; i++) {
+			let j = i + 1;
+			if (questions[i].id === ('question_' + id)) {
+				if (id < questions.length - 1) {
+					
+					document.getElementById("nextbtn_" + i).innerHTML = "<div data-toggle='modal' data-target ='#scoreboard' class='ml-auto mr-sm-5'><button onclick='test("
+							+ i
+							+ ")' class='btn btn-success'><i class='fa fa-forward' aria-hidden='true'></i> Next</button></div>";
+					var nextbtn = document.getElementById("nextqbtn");
+					nextbtn.innerHTML = '<button type="submit" name="submit" class="btn btn-success bb" onclick="showQuestion('
+							+ j + ')"><i class="fa fa-forward" aria-hidden="true"></i> Next Question</button>';
+				} else {
+					document.getElementById("finishbtn").style.display = "block";
+					
+				}
+				questions[i].style.display = 'block';
+			} else
+				questions[i].style.display = 'none';
+		}
+		var m = document.getElementById("id_"+id).value;
+		console.log("MSG: " + m);
+		sendMessage(JSON.stringify(qArray[id]));
+	}
+	
+
+	
+	function sendMessage(msg) {
+		ws3.send(msg);
+	}
+	</script>
+
+</body>
+<%-- <%
+int[] result = Database.getPerQuestionResult(qid);
+%> --%>
+<script>
+
+
+	/* $(document).ready(function(){
+	
+	
+}); */
+</script>
+<script src="https://code.jquery.com/jquery-3.2.1.slim.min.js"
+	integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN"
+	crossorigin="anonymous"></script>
+<script
+	src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js"
+	integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q"
+	crossorigin="anonymous"></script>
+<script
+	src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"
+	integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl"
+	crossorigin="anonymous"></script>
+</html>
+
+*QUIZ:
+
+<html>
+<link rel="stylesheet"
+	href="https://fonts.googleapis.com/css?family=Roboto|Varela+Round">
+<link rel="stylesheet"
+	href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+	integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
+	crossorigin="anonymous">
+<link rel="stylesheet"
+	href="https://fonts.googleapis.com/icon?family=Material+Icons">
+<link rel="stylesheet"
+	href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
+<style>
+body {
+	color: #566787;
+	background: #f5f5f5;
+	font-family: 'Varela Round', sans-serif;
+	font-size: 13px;
+}
+
+.table-responsive {
+	margin: 30px 0;
+}
+
+.table-wrapper {
+	background: #fff;
+	padding: 20px 25px;
+	border-radius: 3px;
+	min-width: 1000px;
+	box-shadow: 0 1px 1px rgba(0, 0, 0, .05);
+}
+
+.table-title {
+	padding-bottom: 15px;
+	background: #435d7d;
+	color: #fff;
+	padding: 16px 30px;
+	min-width: 100%;
+	margin: -20px -25px 10px;
+	border-radius: 3px 3px 0 0;
+}
+
+.table-title h2 {
+	margin: 5px 0 0;
+	font-size: 24px;
+}
+
+.table-title .btn-group {
+	float: right;
+}
+
+.table-title .btn {
+	color: #fff;
+	float: right;
+	font-size: 13px;
+	border: none;
+	min-width: 50px;
+	border-radius: 2px;
+	border: none;
+	outline: none !important;
+	margin-left: 10px;
+}
+
+.table-title .btn i {
+	float: left;
+	font-size: 21px;
+	margin-right: 5px;
+}
+
+.table-title .btn span {
+	float: left;
+	margin-top: 2px;
+}
+
+table.table tr th, table.table tr td {
+	border-color: #e9e9e9;
+	padding: 12px 15px;
+	vertical-align: middle;
+}
+
+table.table tr th:first-child {
+	width: 60%;
+}
+
+table.table tr th:last-child {
+	width: 30%;
+}
+
+table.table-striped tbody tr:nth-of-type(odd) {
+	background-color: #fcfcfc;
+}
+
+table.table-striped.table-hover tbody tr:hover {
+	background: #f5f5f5;
+}
+
+table.table th i {
+	font-size: 13px;
+	margin: 0 5px;
+	cursor: pointer;
+}
+
+table.table td:last-child i {
+	opacity: 0.9;
+	font-size: 22px;
+	margin: 0 5px;
+}
+
+table.table td a {
+	font-weight: bold;
+	color: #566787;
+	display: inline-block;
+	text-decoration: none;
+	outline: none !important;
+}
+
+table.table td a:hover {
+	color: #2196F3;
+}
+
+table.table td a.edit {
+	color: #FFC107;
+}
+
+table.table td a.delete {
+	color: #F44336;
+}
+
+table.table td i {
+	font-size: 19px;
+}
+
+table.table .avatar {
+	border-radius: 50%;
+	vertical-align: middle;
+	margin-right: 10px;
+}
+
+.pagination {
+	float: right;
+	margin: 0 0 5px;
+}
+
+.pagination li a {
+	border: none;
+	font-size: 13px;
+	min-width: 30px;
+	min-height: 30px;
+	color: #999;
+	margin: 0 2px;
+	line-height: 30px;
+	border-radius: 2px !important;
+	text-align: center;
+	padding: 0 6px;
+}
+
+.pagination li a:hover {
+	color: #666;
+}
+
+.pagination li.active a, .pagination li.active a.page-link {
+	background: #03A9F4;
+}
+
+.pagination li.active a:hover {
+	background: #0397d6;
+}
+
+.pagination li.disabled i {
+	color: #ccc;
+}
+
+.pagination li i {
+	font-size: 16px;
+	padding-top: 6px
+}
+
+.hint-text {
+	float: left;
+	margin-top: 10px;
+	font-size: 13px;
+}
+/* Custom checkbox */
+.custom-checkbox {
+	position: relative;
+}
+
+.custom-checkbox input[type="checkbox"] {
+	opacity: 0;
+	position: absolute;
+	margin: 5px 0 0 3px;
+	z-index: 9;
+}
+
+.custom-checkbox label:before {
+	width: 18px;
+	height: 18px;
+}
+
+.custom-checkbox label:before {
+	content: '';
+	margin-right: 10px;
+	display: inline-block;
+	vertical-align: text-top;
+	background: white;
+	border: 1px solid #bbb;
+	border-radius: 2px;
+	box-sizing: border-box;
+	z-index: 2;
+}
+
+.custom-checkbox input[type="checkbox"]:checked+label:after {
+	content: '';
+	position: absolute;
+	left: 6px;
+	top: 3px;
+	width: 6px;
+	height: 11px;
+	border: solid #000;
+	border-width: 0 3px 3px 0;
+	transform: inherit;
+	z-index: 3;
+	transform: rotateZ(45deg);
+}
+
+.custom-checkbox input[type="checkbox"]:checked+label:before {
+	border-color: #03A9F4;
+	background: #03A9F4;
+}
+
+.custom-checkbox input[type="checkbox"]:checked+label:after {
+	border-color: #fff;
+}
+
+.custom-checkbox input[type="checkbox"]:disabled+label:before {
+	color: #b8b8b8;
+	cursor: auto;
+	box-shadow: none;
+	background: #ddd;
+}
+/* Modal styles */
+.modal .modal-dialog {
+	max-width: 400px;
+}
+
+.modal .modal-header, .modal .modal-body, .modal .modal-footer {
+	padding: 20px 30px;
+}
+
+.modal .modal-content {
+	border-radius: 3px;
+	font-size: 14px;
+}
+
+.modal .modal-footer {
+	background: #ecf0f1;
+	border-radius: 0 0 3px 3px;
+}
+
+.modal .modal-title {
+	display: inline-block;
+}
+
+.modal .form-control {
+	border-radius: 2px;
+	box-shadow: none;
+	border-color: #dddddd;
+}
+
+.modal textarea.form-control {
+	resize: vertical;
+}
+
+.modal .btn {
+	border-radius: 2px;
+	min-width: 100px;
+}
+
+.modal form label {
+	font-weight: normal;
+}
+</style>
+
+<script>
+	function setValueById(id, value) {
+		document.getElementById(id).value = value;
+	}
+
+	function loadData(qname, a, b, c, d, ca) {
+		document.getElementById("update_qname").value = qname;
+		document.getElementById("update_a").value = a;
+		document.getElementById("update_b").value = b;
+		document.getElementById("update_c").value = c;
+		document.getElementById("update_d").value = d;
+		document.getElementById("update_ca").value = ca;
+	}
+
+	function update(id, value, qname, a, b, c, d, ca) {
+		setValueById(id, value);
+		loadData(qname, a, b, c, d, ca);
+	}
+</script>
+
+</head>
+<body>
+	<jsp:include page="navbar.jsp" />
+	<div class="container-xl">
+		<div class="table-responsive">
+			<div class="table-wrapper">
+				<div class="table-title">
+					<div class="row">
+						<div class="col-sm-6">
+							<h2>
+								<b> <%=request.getParameter("name")%>
+								</b>
+							</h2>
+						</div>
+				<%@page import="java.sql.*"%>
+				<%@page import="javax.servlet.*, jakarta.servlet.http.*"%>
+				<%
+				String quizid;
+				quizid = request.getParameter("id");
+
+				String username;
+				Connection con;
+				Statement stmt;
+				ResultSet rs;
+
+				HttpSession sess;
+				sess = request.getSession();
+				username = (String) sess.getAttribute("username");
+
+				Class.forName("com.mysql.cj.jdbc.Driver");
+				// con = DriverManager.getConnection("jdbc:mysql://bxdckaiotjos6uxqsxij-mysql.services.clever-cloud.com:3306/bxdckaiotjos6uxqsxij", "u1bl3chv4wysc2pd", "fFWLbfvEvE8CYje7Cv3o");
+				con = DriverManager.getConnection("jdbc:mysql://localhost:3306/online-quiz", "root", "root123");
+				stmt = con.createStatement();
+				rs = stmt.executeQuery("SELECT * FROM questions WHERE quizid='" + quizid + "' ORDER BY timestamp, qno");
+				%>
+						<div class="col-sm-6">
+							<a href="#uploadCSVModal" class="btn btn-success"
+								data-toggle="modal"><i class="fa fa-file" aria-hidden="true"></i>
+								<span> Upload Questions (CSV)</span></a> <a href="#addQuestionModal"
+								class="btn btn-success" data-toggle="modal"><i
+								class="material-icons">&#xE147;</i> <span> New Question</span></a> <a
+								href='presentation.jsp?id=<%=request.getParameter("id")%>'
+								class="btn btn-success <%=rs.isBeforeFirst()?"":"disabled" %>"><i class="fa fa-desktop"
+								aria-hidden="true"></i> <span> Present</span></a>
+						</div>
+					</div>
+				</div>
+				<%
+				if(rs.isBeforeFirst()) {
+				%>
+				<table class="table table-striped table-hover">
+					<thead>
+						<tr>
+							<th>Question</th>
+							<th>Type</th>
+						</tr>
+					</thead>
+					<tbody>
+						<%
+						while (rs.next()) {
+							String qid = rs.getString("questionid");
+							String question = rs.getString("question");
+							String a = rs.getString("option1");
+							String b = rs.getString("option2");
+							String c = rs.getString("option3");
+							String d = rs.getString("option4");
+							String ca = rs.getString("correctanswer");
+							String qType = rs.getString("type");
+						%>
+						<tr>
+							<td><%=question%></td>
+							<td><%=qType%></td>
+							<td><a href="#editQuestionModal" class="edit"
+								data-toggle="modal"><i class="material-icons"
+									data-toggle="tooltip" title="Edit" id="<%=qid%>"
+									onclick="update('update_qsid', '<%=qid%>', '<%=question%>', '<%=a%>', '<%=b%>', '<%=c%>', '<%=d%>', '<%=ca%>')">&#xE254;</i></a>
+								<a href="#deleteQuestionModal" class="delete"
+								data-toggle="modal"><i class="material-icons"
+									data-toggle="tooltip" title="Delete" id="<%=qid%>"
+									onclick="setValueById('delete_qsid', '<%=qid%>')">&#xE872;</i></a></td>
+						</tr>
+						<%
+						}
+						%>
+
+					</tbody>
+				</table>
+				<%
+				} else {
+					%>
+					<div class="jumboron" style="text-align: center;"><h2>You haven't added any questions yet!</h2></div>
+					<%
+				}
+				%>
+			</div>
+		</div>
+	</div>
+	<!-- Add Modal HTML -->
+	<div id="addQuestionModal" class="modal fade">
+		<div class="modal-dialog">
+			<div class="modal-content">
+				<div class="card custom-card">
+
+					<form method="post" action="AddQuestion?id=<%=quizid%>">
+
+						<div class="card-header">
+							<h2 class="custom-heading">Add Question</h2>
+						</div>
+
+						<div class="card-body">
+
+							<div class="form-group">
+								<input type="text" name="q" class="form-control"
+									placeholder="Enter Question" required />
+							</div>
+							<div class="form-group">
+								<input type="text" name="a" class="form-control" placeholder="A"
+									required />
+							</div>
+							<div class="form-group">
+								<input type="text" name="b" class="form-control" placeholder="B"
+									required />
+							</div>
+							<div class="form-group">
+								<input type="text" name="c" class="form-control" placeholder="C" />
+							</div>
+							<div class="form-group">
+								<input type="text" name="d" class="form-control" placeholder="D" />
+							</div>
+							<div class="form-group">
+								<input type="number" min="1" max="4" name="ca"
+									class="form-control" placeholder="Correct Answer" required />
+							</div>
+
+							<div class="form-group">
+								<input type="submit" name="submit" value="Add"
+									class="btn btn-success bb">
+							</div>
+						</div>
+					</form>
+
+				</div>
+			</div>
+		</div>
+	</div>
+	<!-- Edit Modal HTML -->
+	<div id="editQuestionModal" class="modal fade">
+		<div class="modal-dialog">
+			<div class="modal-content">
+				<div class="card custom-card">
+
+					<form method="post" action="UpdateQuestion">
+						<input type="hidden" id="update_qsid" name="id">
+						<div class="card-header">
+							<h2 class="custom-heading">Edit Question</h2>
+						</div>
+
+						<div class="card-body">
+
+							<div class="form-group">
+								<input type="text" name="update_qname" id="update_qname"
+									class="form-control" placeholder="Enter Question" required />
+							</div>
+							<div class="form-group">
+								<input type="text" name="a" id="update_a" class="form-control"
+									placeholder="A" required />
+							</div>
+							<div class="form-group">
+								<input type="text" name="b" id="update_b" class="form-control"
+									placeholder="B" required />
+							</div>
+							<div class="form-group">
+								<input type="text" name="c" id="update_c" class="form-control"
+									placeholder="C" />
+							</div>
+							<div class="form-group">
+								<input type="text" name="d" id="update_d" class="form-control"
+									placeholder="D" />
+							</div>
+							<div class="form-group">
+								<input type="number" min="1" max="4" name="ca" id="update_ca"
+									class="form-control" placeholder="Correct Answer" required />
+							</div>
+
+							<div class="form-group">
+								<input type="submit" name="submit" value="Update"
+									class="btn btn-success bb">
+							</div>
+						</div>
+					</form>
+
+				</div>
+			</div>
+		</div>
+	</div>
+	<!-- Delete Modal HTML -->
+	<div id="deleteQuestionModal" class="modal fade">
+		<div class="modal-dialog">
+			<div class="modal-content">
+				<form method="POST" action="DeleteQuestion">
+					<input type="hidden" id="delete_qsid" name="id">
+					<div class="modal-header">
+						<h4 class="modal-title">Delete Question</h4>
+						<button type="button" class="close" data-dismiss="modal"
+							aria-hidden="true">&times;</button>
+					</div>
+					<div class="modal-body">
+						<p>Are you sure you want to delete these question?</p>
+						<p class="text-warning">
+							<small>This action cannot be undone.</small>
+						</p>
+					</div>
+					<div class="modal-footer">
+						<input type="button" class="btn btn-default" data-dismiss="modal"
+							value="Cancel"> <input type="submit"
+							class="btn btn-danger" value="Delete">
+					</div>
+				</form>
+			</div>
+		</div>
+	</div>
+
+	<!-- Upload CSV Modal HTML -->
+	<div id="uploadCSVModal" class="modal fade">
+		<div class="modal-dialog">
+			<div class="modal-content">
+				<div class="card custom-card">
+
+					<form method="post" action="UploadQuestionsCSV"
+						enctype="multipart/form-data" id="uploadCSVForm">
+
+						<div class="card-header">
+							<h2 class="custom-heading">Upload Questions as CSV</h2>
+						</div>
+
+						<div class="card-body">
+							<input type="hidden" value="<%=quizid%>" name="quizid">
+
+							<div class="form-group">
+								<input type="file" name="questionsFile" class="form-control"
+									required />
+							</div>
+
+							<div class="form-group">
+								<input type="submit" id="uploadSubmit" name="uploadSubmit" value="Upload"
+									class="btn btn-success bb">
+							</div>
+
+							<div class="progress" id="pbar" style="display: none;">
+								<div id="progressBar" class="progress-bar" role="progressbar"
+									style="width: 0%;" aria-valuenow="25"
+									aria-valuemin="0" aria-valuemax="100">Uploading...</div>
+							</div>
+						</div>
+					</form>
+				</div>
+			</div>
+		</div>
+	</div>
+	<script>
+		document.getElementById("uploadCSVForm").addEventListener("submit", (e) => {
+			e.preventDefault();
+			document.getElementById("pbar").style.display="block";
+			document.getElementById("uploadSubmit").disabled=true;
+			var i = 0;
+			var interval = setInterval(() => { 
+				if(i>100) {
+					clearInterval(interval);
+					document.getElementById("uploadSubmit").disabled = false;
+					document.getElementById("pbar").style.display="none";
+				}
+				i+=5;
+				document.getElementById("progressBar").style.width = i+"%";
+			}, 100);
+			setTimeout(() => document.getElementById("uploadCSVForm").submit(), 3000)
+		}, true);
+	</script>
+</body>
+
+<script src="https://code.jquery.com/jquery-3.2.1.slim.min.js"
+	integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN"
+	crossorigin="anonymous"></script>
+<script
+	src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js"
+	integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q"
+	crossorigin="anonymous"></script>
+<script
+	src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"
+	integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl"
+	crossorigin="anonymous"></script>
+</html>
+
+*RATE:
+
+
+<jsp:include page="header.jsp" />
+<% String quizid = request.getParameter("id"); 
+String username = (String) session.getAttribute("username");
+%>
+<title>Rate us</title>
+<style>
+.slidecontainer {
+	width: 100%;
+}
+
+.slider {
+  border: solid #0db3dd 1px;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 25px;
+  background: #d3d3d3;
+  border-radius: 33px;
+  outline: none;
+  opacity: 0.7;
+  -webkit-transition: .2s;
+  transition: opacity .2s;
+}
+
+.slider:hover {
+  opacity: 1;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 25px;
+  height: 25px;
+  background: #007bff;
+  border-radius: 10rem;
+  cursor: pointer;
+}
+
+.slider::-moz-range-thumb {
+  width: 25px;
+  height: 25px;
+  background: #007bff;
+  border-radius: 10rem;
+  cursor: pointer;
+}
+</style>
+</head>
+<body>
+<div class="row mt-5">
+	<div class="col col-lg-12">
+		<h1 style="text-align:center;">Rate us</h1>
+	</div>
+</div>
+<form method="post" action="SubmitFeedback">
+	<div class="row mt-5">
+		<div class="col col-lg-4"></div>
+		<div class="col col-lg-4">
+			<div class="slidecontainer">
+				<input type="hidden" name="quizid" value="<%= quizid %>"/>
+				<input type="hidden" name="username" value="<%= username %>"/>
+		  		<input type="range" name="rating" min="1" max="5" value="1" class="slider" id="myRange">
+		  		<p style="text-align:center;"><span id="demo" style="font-size: 50px;"></span></p>
+			</div>
+		</div>
+		<div class="col col-lg-4"></div>
+	</div>
+	<div class="row mt-5">
+	  <div class="col col-lg-4"></div>
+	    <div class="col col-lg-4 text-center">	
+			<input type="submit" name="submit" class="btn btn-primary btn-lg" value="Submit" />
+		</div>
+		<div class="col col-lg-4"></div>
+	</div>
+</form>
+<script>
+var slider = document.getElementById("myRange");
+var output = document.getElementById("demo");
+output.innerHTML = slider.value;
+
+slider.oninput = function() {
+  output.innerHTML = this.value;
+  var value = (this.value-this.min)/(this.max-this.min)*100
+  this.style.background = 'linear-gradient(to right, #82CFD0 0%, #82CFD0 ' + value + '%, #fff ' + value + '%, white 100%)'
+}
+</script>
+
+<jsp:include page="footer.jsp" />
+
+
+*REGISTER:
+
+<jsp:include page="header.jsp" />
+<title>Register</title>
+</head>
+<body>
+	<div class="back">
+		<img src="img/3.jpg" class="bgimg" type="jpg/jpeg">
+	</div>
+	<div class="card custom-card">
+		<div class="card-header"><h2 class="custom-heading">Register</h2></div>
+		<div class="card-body">
+			<form action="Register" method="post">
+				<div class="form-group" >
+					<input type="text" name="name" class="form-control" placeholder="Full Name" />
+				</div>
+
+				<div class="form-group" >
+					<input type="text" name="email" class="form-control" placeholder="Email" />
+				</div>
+
+				<div class="form-group" >
+					<input type="text" name="username" class="form-control" placeholder="Username" />
+				</div>
+
+				<div class="form-group" >
+					<input type="password" name="password" class="form-control" placeholder="Password" />
+				</div>
+
+				<div class="form-group" >
+					<input type="password" name="repassword" class="form-control" placeholder="Re-enter Password" />
+				</div>
+
+				<div class="form-group">
+					<button type="submit" class="btn btn-primary" ><i class="fa fa-user-circle" aria-hidden="true"></i> Register</button>
+				</div>
+			</form>
+			<br>
+			<a href="index.jsp"><button class="btn btn-success">Already have an account? Login <i class="fa fa-sign-in" aria-hidden="true"></i></button></a>
+		</div>
+	</div>
+	<jsp:include page="footer.jsp" />
+
+
+*SCOREBOARD:
+
+
+<%@page import="java.sql.*, java.util.*"%>
+	<%@page import="models.Score, db.Database"%>
+	<%@page import="javax.servlet.*, jakarta.servlet.http.*"%>
+<script>
+
+/* var ws2 = new WebSocket(wsUrl + window.location.host
+		+ "/OnlineQuiz/GetDetails");
+
+ws2.onmessage = function(event) {
+	var result = event.data.split(',');
+	if(result[0].indexOf(":") == -1) {
+		google.charts.load('current', {'packages':['corechart']});
+		google.charts.setOnLoadCallback(drawChart);
+		function drawChart() {
+			var data = google.visualization.arrayToDataTable([
+				['Result', 'Total'],
+				['Correct Answers', parseInt(result[0])],
+				['Wrong Answers', parseInt(result[1])]
+				]);
+			
+			var options = {
+				title: 'Score in percentage'
+			};
+		
+			var chart = new google.visualization.PieChart(document.getElementById('piechart'));
+			chart.draw(data, options);
+		}
+	}
+		else {
+			console.log(result);
+			document.getElementById("teebodee").innerHTML = "";
+			for(let i = 0; i < result.length; i++) {
+				let j = i + 1;
+				var dat = result[i].split(":");
+				document.getElementById("teebodee").innerHTML += '<tr><th scope="row">' + j + '</th><td>'+dat[0]+'</td><td>'+dat[1]+'/'+dat[2]+'</td></tr>';				
+			}
+		} 
+};*/
+	
+	<%-- document.getElementById("teebodee").innerHTML = "";
+	<% 
+	String quizid = request.getParameter("id");
+	List<Score> scores = db.Database.getScoreboard(quizid);
+	Iterator<Score> itr = scores.iterator();
+	int i = 1;
+	while (itr.hasNext()) {
+		Score s = itr.next();
+	%>
+	document.getElementById("teebodee").innerHTML += '<tr><th scope="row"><%=i++%></th><td><%=s.username%></td><td><%=s.score%></td></tr>';
+	<%
+	}
+	%> --%>
+
+/* ws2.onerror = function(event) {
+	console.log("Error ", event)
+} */
+</script>
+
+<!-- Scoreboard Modal HTML -->
+<div id="scoreboard" class="modal custom-modal fade">
+	<div class="modal-dialog" style="max-width: 70%!important;">
+		<div class="modal-content">
+			<div class="card score-card">
+				<div class="card-header">
+					<h2 class="custom-heading">Scoreboard</h2>
+					<button id="closeScoreboard" type="button" class="close"
+						data-dismiss="modal" aria-label="Close" style="display: none;">
+						<span aria-hidden="true">&times;</span>
+					</button>
+				</div>
+				<div class="card-body">
+					<center id="crtans"><b>Correct Answer: A</b></center>
+					<div class="row mt-5">
+						<div class="col-md-6">
+							<table class="table table-hover table-light table-borderless"
+								style="width: 60%; margin: 0 auto;'">
+								<thead class="thead-dark">
+									<tr>
+										<th scope="col">No.</th>
+										<th scope="col">Username</th>
+										<th scope="col">Score</th>
+									</tr>
+								</thead>
+								<tbody id="teebodee">
+									<%-- <%@page import="java.sql.*, java.util.*"%>
+									<%@page import="models.Score, db.Database"%>
+									<%@page import="javax.servlet.*, javax.servlet.http.*"%>
+
+									<%
+									String quizid = request.getParameter("id");
+									List<Score> scores = Database.getScoreboard(quizid);
+									Iterator<Score> itr = scores.iterator();
+									int i = 1;
+									while (itr.hasNext()) {
+										Score s = itr.next();
+									%>
+									<tr>
+										<th scope="row"><%=i++%></th>
+										<td><%=s.username%></td>
+										<td><%=s.score%></td>
+									</tr>
+									<%
+									}
+									%> --%>
+								</tbody>
+							</table>
+						</div>
+						<div class="col-md-6">
+							<div class="container d-flex justify-container-center">
+							    <div class="row">
+							        <div class="col-md-12">
+							            <div id="piechart" style="width: 100%;"></div>
+							        </div>
+							    </div>
+							</div>
+						</div>	
+					</div>
+					<br />
+					<center>
+						<div class="form-group" id="nextqbtn">
+							<input type="submit" name="submit" value="Next Question"
+								class="btn btn-success bb">
+						</div>
+					</center>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+
+
+CLASSPATH:
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="src" path="src/main/java"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-11">
+		<attributes>
+			<attribute name="module" value="true"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="con" path="org.eclipse.jst.j2ee.internal.web.container"/>
+	<classpathentry kind="con" path="org.eclipse.jst.j2ee.internal.module.container"/>
+	<classpathentry kind="lib" path="C:/Users/232211-DB1059AU/Downloads/commons-io-2.9.0.jar">
+		<attributes>
+			<attribute name="org.eclipse.jst.component.dependency" value="/WEB-INF/lib"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="C:/Users/232211-DB1059AU/Downloads/mysql-connector-java-8.0.21.jar">
+		<attributes>
+			<attribute name="org.eclipse.jst.component.dependency" value="/WEB-INF/lib"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="C:/Users/232211-DB1059AU/Downloads/rs2xml.jar">
+		<attributes>
+			<attribute name="org.eclipse.jst.component.dependency" value="/WEB-INF/lib"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="C:/Users/232211-DB1059AU/Downloads/jxbrowser-2.8.jar">
+		<attributes>
+			<attribute name="org.eclipse.jst.component.dependency" value="/WEB-INF/lib"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="C:/Users/232211-DB1059AU/Downloads/commons-fileupload-1.4.jar">
+		<attributes>
+			<attribute name="org.eclipse.jst.component.dependency" value="/WEB-INF/lib"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="src/main/webapp/WEB-INF/lib/jstl-1.2-sources.jar"/>
+	<classpathentry kind="con" path="org.eclipse.jst.server.core.container/org.eclipse.jst.server.tomcat.runtimeTarget/apache-tomcat-10.0"/>
+	<classpathentry kind="lib" path="C:/Users/232211-DB1059AU/Downloads/servlet-api.jar"/>
+	<classpathentry kind="output" path="build/classes"/>
+</classpath>
+
+
+
+
+PROJECT:
+
+
+
+		?xml version="1.0" encoding="UTF-8"?>
+<projectDescription>
+	<name>Quiz_new</name>
+	<comment></comment>
+	<projects>
+	</projects>
+	<buildSpec>
+		<buildCommand>
+			<name>org.eclipse.jdt.core.javabuilder</name>
+			<arguments>
+			</arguments>
+		</buildCommand>
+		<buildCommand>
+			<name>org.eclipse.wst.common.project.facet.core.builder</name>
+			<arguments>
+			</arguments>
+		</buildCommand>
+		<buildCommand>
+			<name>org.eclipse.wst.validation.validationbuilder</name>
+			<arguments>
+			</arguments>
+		</buildCommand>
+	</buildSpec>
+	<natures>
+		<nature>org.eclipse.jem.workbench.JavaEMFNature</nature>
+		<nature>org.eclipse.wst.common.modulecore.ModuleCoreNature</nature>
+		<nature>org.eclipse.wst.common.project.facet.core.nature</nature>
+		<nature>org.eclipse.jdt.core.javanature</nature>
+		<nature>org.eclipse.wst.jsdt.core.jsNature</nature>
+	</natures>
+</projectDescription>
